@@ -37,5 +37,7 @@ The following are product failures, not documented setup steps:
   that same theme on its trusted peer without copying arbitrary configuration.
 - A missing or unsafe theme name does not modify the peer and is reported in
   the daemon journal.
+- A trusted peer's `~/OmarchySync/share` is mounted locally under
+  `~/OmarchySync/machines/<peer-id>`; no other home or system path is exposed.
 - SSH, synchronization, mounts, and privileged work are separately tested when
   those layers are implemented.

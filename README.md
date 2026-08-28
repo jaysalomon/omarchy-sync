@@ -47,6 +47,17 @@ logged; custom theme assets and backgrounds will be the next extension. Monitor
 layouts, input settings, private keys, browser data, and other machine-local
 state remain local.
 
+## Network drives
+
+Each trusted machine exposes one purpose-built folder,
+`~/OmarchySync/share`. OmarchySync creates it automatically and mounts the
+peer's folder locally at `~/OmarchySync/machines/<peer-id>`. This is a live
+network drive over the paired, pinned SSH identity—not a second full-home copy.
+
+Only files deliberately placed in `share` are visible to the other trusted
+machine. Home directories, SSH keys, credentials, browser profiles, and system
+disks are not exported. The mount reconnects while both machines are online.
+
 ## One-touch pairing
 
 `omarchy-syncd` listens on the fixed OmarchySync enrollment port `49321`.

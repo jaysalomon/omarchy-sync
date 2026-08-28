@@ -69,3 +69,14 @@ Omarchy's headless theme apply command on each trusted peer.
 The remote Omarchy command remains the policy authority: it only applies a
 theme that exists there. This release intentionally synchronizes selection, not
 custom theme directories, backgrounds, or general desktop configuration.
+
+## Network drives
+
+The first mount capability is deliberately narrow. Every trusted machine owns
+`~/OmarchySync/share`, and the daemon mounts that peer-owned folder at
+`~/OmarchySync/machines/<peer-id>` using SSHFS, the paired Ed25519 identity,
+and pinned host-key verification. The mount is retried while the peer is
+online.
+
+No home directory, system disk, or arbitrary path is exported. Broader shares,
+write policy, and revocation controls require their own capability design.

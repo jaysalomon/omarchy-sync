@@ -20,6 +20,7 @@ const DEFAULT_PORT: u16 = 49_321;
 const MAX_FRAME: usize = 4096;
 const TTL_SECONDS: u64 = 90;
 const THEME_POLL_INTERVAL: Duration = Duration::from_secs(3);
+const MOUNT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 struct Device {
@@ -32,6 +33,8 @@ struct Device {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TrustedPeer {
     identity: String,
+    #[serde(default)]
+    device: String,
     address: SocketAddr,
 }
 
@@ -302,17 +305,33 @@ fn peers_dir() -> PathBuf {
     state_dir().join("peers")
 }
 
-fn record_peer(identity: &str, address: SocketAddr) -> Result<()> {
+fn record_peer(identity: &str, device: &str, address: SocketAddr) -> Result<()> {
     let directory = peers_dir();
     fs::create_dir_all(&directory)?;
     fs::write(
         directory.join(format!("{identity}.json")),
         serde_json::to_vec_pretty(&TrustedPeer {
             identity: identity.into(),
+            device: device.into(),
             address,
         })?,
     )?;
     Ok(())
+}
+
+fn sync_root() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/var/lib/omarchy-sync"))
+        .join("OmarchySync")
+}
+
+fn shared_root() -> PathBuf {
+    sync_root().join("share")
+}
+
+fn peer_mountpoint(peer: &TrustedPeer) -> PathBuf {
+    sync_root().join("machines").join(&peer.identity)
 }
 
 fn trusted_peers() -> Vec<TrustedPeer> {
@@ -377,6 +396,75 @@ fn sync_theme(peer: &TrustedPeer, theme: &str) -> Result<()> {
     Ok(())
 }
 
+fn ssh_options(command: &mut Command, peer: &TrustedPeer) {
+    command
+        .args(["-i"])
+        .arg(state_dir().join("ssh/id_ed25519"))
+        .args([
+            "-p",
+            "22",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+        ])
+        .arg(format!(
+            "UserKnownHostsFile={}",
+            ssh_dir().join("known_hosts").display()
+        ))
+        .arg(peer.address.ip().to_string());
+}
+
+fn is_mountpoint(path: &Path) -> bool {
+    Command::new("/usr/bin/mountpoint")
+        .args(["-q"])
+        .arg(path)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn mount_peer_share(peer: &TrustedPeer) -> Result<()> {
+    fs::create_dir_all(shared_root())?;
+    let mut mkdir = Command::new("/usr/bin/ssh");
+    ssh_options(&mut mkdir, peer);
+    let status = mkdir
+        .arg("mkdir -p OmarchySync/share")
+        .status()
+        .context("create peer shared folder")?;
+    if !status.success() {
+        bail!("peer shared folder setup failed");
+    }
+
+    let mountpoint = peer_mountpoint(peer);
+    fs::create_dir_all(&mountpoint)?;
+    if is_mountpoint(&mountpoint) {
+        return Ok(());
+    }
+    let options = format!(
+        "IdentityFile={},UserKnownHostsFile={},StrictHostKeyChecking=yes,BatchMode=yes,port=22,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3",
+        state_dir().join("ssh/id_ed25519").display(),
+        ssh_dir().join("known_hosts").display(),
+    );
+    let status = Command::new("/usr/bin/sshfs")
+        .arg("-o")
+        .arg(options)
+        .arg(format!("{}:OmarchySync/share", peer.address.ip()))
+        .arg(&mountpoint)
+        .status()
+        .context("mount peer shared folder")?;
+    if !status.success() {
+        bail!("sshfs mount failed");
+    }
+    eprintln!(
+        "peer share mounted: device={} path={}",
+        peer.device,
+        mountpoint.display()
+    );
+    Ok(())
+}
+
 fn run_theme_sync() {
     let mut observed = current_theme();
     loop {
@@ -400,6 +488,20 @@ fn run_theme_sync() {
                 }
             });
         }
+    }
+}
+
+fn run_mount_sync() {
+    loop {
+        for peer in trusted_peers() {
+            if let Err(error) = mount_peer_share(&peer) {
+                eprintln!(
+                    "peer share mount failed for {} at {}: {error:#}",
+                    peer.identity, peer.address
+                );
+            }
+        }
+        thread::sleep(MOUNT_POLL_INTERVAL);
     }
 }
 
@@ -510,7 +612,7 @@ fn record_trusted(identity: &str, packet: &Packet, address: SocketAddr) -> Resul
         serde_json::to_vec_pretty(packet)?,
     )?;
     establish_ssh_trust(device, address, public_key, host_key)?;
-    record_peer(identity, address)
+    record_peer(identity, device, address)
 }
 
 fn is_trusted(identity: &str) -> bool {
@@ -720,7 +822,7 @@ fn run_discovery(port: u16, device: Arc<Device>) -> Result<()> {
             }
             let peer = SocketAddr::new(source.ip(), tcp_port);
             if is_trusted(&peer_identity)
-                && let Err(error) = record_peer(&peer_identity, peer)
+                && let Err(error) = record_peer(&peer_identity, &peer_name, peer)
             {
                 eprintln!("failed to refresh peer endpoint: {error:#}");
             }
@@ -765,6 +867,7 @@ fn main() -> Result<()> {
         }
     });
     thread::spawn(run_theme_sync);
+    thread::spawn(run_mount_sync);
     run_tcp(port)
 }
 
@@ -820,6 +923,15 @@ mod tests {
         assert!(!valid_theme_name(""));
         assert!(!valid_theme_name("../not-a-theme"));
         assert!(!valid_theme_name("theme; command"));
+    }
+    #[test]
+    fn peer_mount_is_scoped_to_its_identity() {
+        let peer = TrustedPeer {
+            identity: "a".repeat(32),
+            device: "laptop".into(),
+            address: SocketAddr::from(([192, 168, 0, 215], 49_321)),
+        };
+        assert!(peer_mountpoint(&peer).ends_with("machines/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
     }
     #[test]
     fn tcp_handler_records_trust_and_rejects_replay() {

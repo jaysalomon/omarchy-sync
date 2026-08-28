@@ -1,11 +1,11 @@
 pkgname=omarchy-sync
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Trusted multi-machine continuity service for Omarchy'
 arch=('x86_64')
 url='https://github.com/jaysalomon/omarchy-sync'
 license=('MIT')
-depends=('systemd' 'polkit' 'hyprpolkitagent' 'openssh')
+depends=('systemd' 'polkit' 'hyprpolkitagent' 'openssh' 'sshfs')
 makedepends=('cargo')
 install="$pkgname.install"
 source=()
