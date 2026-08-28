@@ -1,5 +1,5 @@
 pkgname=omarchy-sync
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Trusted multi-machine continuity service for Omarchy'
 arch=('x86_64')
@@ -8,8 +8,12 @@ license=('MIT')
 depends=('systemd' 'polkit' 'openssh')
 makedepends=('cargo')
 install="$pkgname.install"
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=()
+
+prepare() {
+  mkdir -p "$srcdir/$pkgname-$pkgver"
+  git -C "$startdir/../.." archive --format=tar HEAD | tar -x -C "$srcdir/$pkgname-$pkgver"
+}
 
 build() {
   cd "$pkgname-$pkgver"
