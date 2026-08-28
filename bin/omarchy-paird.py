@@ -4,12 +4,12 @@
 This is intentionally an enrollment service, not a general remote shell.
 The peer must still pass local authorization before its SSH identity is trusted.
 """
-import base64
 import json
 import os
 import secrets
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -49,6 +49,28 @@ def parse_hello(raw):
     if len(key.split()) < 2 or not key.startswith(("ssh-ed25519 ", "ecdsa-sha2-", "ssh-rsa ")):
         fail("unsupported public key")
     return msg
+
+
+def parse_discovery(raw):
+    if len(raw) > 1024:
+        fail("discovery frame too large")
+    msg = json.loads(raw.decode("utf-8"))
+    if msg.get("magic") != MAGIC or msg.get("version") != VERSION or msg.get("type") != "DISCOVER":
+        fail("invalid discovery header")
+    if not isinstance(msg.get("device"), str) or not 1 <= len(msg["device"]) <= 64:
+        fail("invalid discovery device")
+    if abs(int(time.time()) - int(msg.get("timestamp", 0))) > TTL:
+        fail("expired discovery")
+    return msg
+
+
+def local_public_key():
+    key = HOME / ".ssh/id_ed25519_omarchy_sync"
+    pub = key.with_suffix(key.suffix + ".pub")
+    key.parent.mkdir(mode=0o700, exist_ok=True)
+    if not pub.exists():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-f", str(key), "-N", "", "-C", "omarchy-sync@" + socket.gethostname()], check=True)
+    return pub.read_text().strip()
 
 
 def local_authorize(device):
@@ -105,8 +127,47 @@ def handle(conn, address):
     conn.close()
 
 
+def send_hello(address):
+    try:
+        msg = {
+            "magic": MAGIC, "version": VERSION, "type": "PAIR_HELLO",
+            "timestamp": int(time.time()), "nonce": secrets.token_hex(32),
+            "device": socket.gethostname(), "ssh_public_key": local_public_key(),
+            "scope": ["sync", "ssh", "compute", "privileged"],
+        }
+        with socket.create_connection((address, PORT), timeout=5) as conn:
+            conn.sendall((json.dumps(msg) + "\n").encode())
+            conn.recv(4096)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def discovery_loop():
+    device = socket.gethostname()
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("", PORT))
+                sock.settimeout(15)
+                announce = {"magic": MAGIC, "version": VERSION, "type": "DISCOVER", "timestamp": int(time.time()), "device": device}
+                sock.sendto(json.dumps(announce).encode(), ("255.255.255.255", PORT))
+                while True:
+                    raw, address = sock.recvfrom(2048)
+                    try:
+                        peer = parse_discovery(raw)
+                        if peer["device"] != device and device < peer["device"]:
+                            threading.Thread(target=send_hello, args=(address[0],), daemon=True).start()
+                    except (ValueError, json.JSONDecodeError):
+                        continue
+        except OSError:
+            time.sleep(15)
+
+
 def main():
     STATE.mkdir(parents=True, exist_ok=True)
+    threading.Thread(target=discovery_loop, daemon=True).start()
     with socket.create_server((HOST, PORT), backlog=2) as server:
         server.settimeout(30)
         while True:

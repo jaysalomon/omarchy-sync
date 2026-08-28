@@ -44,6 +44,12 @@ the first machine, initiate the one-touch pairing with:
 The receiving machine performs local PAM/polkit authentication and creates the
 SSH trust entry itself. No SSH key needs to be copied beforehand.
 
+When both daemons are running on the same LAN, they automatically announce and
+discover each other. A deterministic device election prevents duplicate
+prompts; the selected receiver performs the one-time local authorization
+without requiring the user to provide an IP address or tell another machine to
+begin.
+
 Set the remote machine in `~/.config/omarchy-sync/config` after pairing:
 
 ```text
