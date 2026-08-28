@@ -1,8 +1,20 @@
+configure_firewall() {
+  local lan_cidr
+  lan_cidr="$(ip -4 route show scope link | awk '$1 ~ /\// {print $1; exit}')"
+  if command -v ufw >/dev/null && ufw status | grep -q '^Status: active' && [[ -n "$lan_cidr" ]]; then
+    ufw allow from "$lan_cidr" to any port 49321 proto tcp comment 'OmarchySync pairing'
+    ufw allow from "$lan_cidr" to any port 49321 proto udp comment 'OmarchySync discovery'
+    ufw reload
+  fi
+}
+
 post_install() {
+  configure_firewall
   systemctl --global enable omarchy-syncd.service
 }
 
 post_upgrade() {
+  configure_firewall
   systemctl --global enable omarchy-syncd.service
 }
 
