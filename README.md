@@ -12,7 +12,7 @@ See `docs/ACCEPTANCE.md` for the non-negotiable product flow and test gates.
 The runtime path is the Arch package, built from a GitHub release artifact:
 
 ```bash
-sudo pacman -U omarchy-sync-*.pkg.tar.zst
+./install.sh
 ```
 
 Pacman installs the compiled binary, user service, and polkit policy. The
