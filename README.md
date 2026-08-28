@@ -7,6 +7,22 @@ daemon `omarchy-syncd`. See `docs/ACCEPTANCE.md` for the non-negotiable product
 flow and test gates. The scripts under `bin/` are retained as the original
 protocol experiment and are not the production architecture.
 
+## Laptop test build
+
+Update the repository and install the compiled system daemon:
+
+```bash
+git pull
+./install-system.sh
+```
+
+The installer builds the release binary, disables the conflicting user-level
+prototype, installs the hardened system service, opens LAN-scoped firewall
+rules when UFW is active, and starts automatic discovery. No peer IP or manual
+pairing command is required. The current milestone discovers the peer, performs
+the TCP handshake, and records a pending authorization request; the fingerprint
+authorization broker is the next implementation gate.
+
 This first prototype provides:
 
 - a user-level service that runs at login;
