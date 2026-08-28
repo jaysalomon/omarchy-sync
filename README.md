@@ -9,19 +9,18 @@ protocol experiment and are not part of the production tree.
 
 ## Laptop test build
 
-Update the repository and install the compiled system daemon:
+For the immediate two-laptop test, update and run the compiled daemon:
 
 ```bash
 git pull
-./install-system.sh
+./run-daemon.sh
 ```
 
-The installer builds the release binary, disables the conflicting user-level
-prototype, installs the hardened system service, opens LAN-scoped firewall
-rules when UFW is active, and starts automatic discovery. No peer IP or manual
-pairing command is required. The current milestone discovers the peer, performs
-the TCP handshake, and records a pending authorization request; the fingerprint
-authorization broker is the next implementation gate.
+No peer IP, pairing command, or key copy is required. Both daemons discover
+each other and one receiving machine uses its local polkit/PAM stack (including
+fingerprint auth when configured) before approving trust.
+
+`./install-system.sh` is retained for systemd installation after the live test.
 
 This first prototype provides:
 

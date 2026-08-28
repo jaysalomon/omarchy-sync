@@ -7,6 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/lib/omarchy-sync/omarchy-syncd
+Environment=OMARCHY_SYNCD_STATE_DIR=/var/lib/omarchy-sync
 Restart=on-failure
 RestartSec=5
 StateDirectory=omarchy-sync

@@ -50,6 +50,8 @@ enum Packet {
         version: u8,
         nonce: String,
         device: String,
+        identity: String,
+        public_key: String,
     },
     PairReject {
         magic: String,
@@ -130,9 +132,18 @@ fn validate(packet: &Packet, current_time: u64) -> Result<()> {
             magic,
             version,
             device,
+            identity,
+            public_key,
             ..
         } => {
-            if magic != MAGIC || *version != VERSION || device.is_empty() || device.len() > 64 {
+            if magic != MAGIC
+                || *version != VERSION
+                || device.is_empty()
+                || device.len() > 64
+                || identity.len() != 32
+                || !identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || !public_key.starts_with("ssh-ed25519 ")
+            {
                 bail!("invalid response header");
             }
             return Ok(());
@@ -209,8 +220,25 @@ fn send_packet(stream: &mut TcpStream, packet: &Packet) -> Result<()> {
 fn pending_dir() -> PathBuf {
     env::var_os("OMARCHY_SYNCD_STATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/var/lib/omarchy-sync"))
+        .unwrap_or_else(|| {
+            env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("/var/lib"))
+                        .join(".local/state")
+                })
+                .join("omarchy-sync")
+        })
         .join("pending")
+}
+
+fn trusted_dir() -> PathBuf {
+    pending_dir()
+        .parent()
+        .unwrap_or_else(|| Path::new("/var/lib/omarchy-sync"))
+        .join("trusted")
 }
 
 fn record_pending(packet: &Packet) -> Result<()> {
@@ -226,21 +254,64 @@ fn record_pending(packet: &Packet) -> Result<()> {
     Ok(())
 }
 
+fn record_trusted(identity: &str, packet: &Packet) -> Result<()> {
+    let directory = trusted_dir();
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        directory.join(format!("{identity}.json")),
+        serde_json::to_vec_pretty(packet)?,
+    )?;
+    Ok(())
+}
+
+fn is_trusted(identity: &str) -> bool {
+    trusted_dir().join(format!("{identity}.json")).exists()
+}
+
+fn local_authorize(device: &str) -> bool {
+    if env::var("OMARCHY_SYNCD_AUTO_APPROVE").as_deref() == Ok("1") {
+        return true;
+    }
+    eprintln!("local authorization requested for {device}");
+    std::process::Command::new("pkexec")
+        .arg("/usr/bin/true")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn handle_tcp(mut stream: TcpStream) -> Result<()> {
     let frame = read_frame(&mut stream)?;
     let response = match decode_frame(&frame, now()) {
         Ok(packet @ Packet::PairHello { .. }) => {
-            if let Packet::PairHello {
-                device, identity, ..
+            let Packet::PairHello {
+                device,
+                identity,
+                nonce,
+                ..
             } = &packet
-            {
-                eprintln!("pair request received: device={device} identity={identity}");
-            }
-            record_pending(&packet)?;
-            Packet::PairReject {
-                magic: MAGIC.into(),
-                version: VERSION,
-                reason: "pairing request recorded; authorization broker is the next gate".into(),
+            else {
+                unreachable!();
+            };
+            eprintln!("pair request received: device={device} identity={identity}");
+            if is_trusted(identity) || local_authorize(device) {
+                record_trusted(identity, &packet)?;
+                let local = load_device();
+                Packet::PairAccept {
+                    magic: MAGIC.into(),
+                    version: VERSION,
+                    nonce: nonce.clone(),
+                    device: local.name,
+                    identity: local.identity,
+                    public_key: local.public_key,
+                }
+            } else {
+                record_pending(&packet)?;
+                Packet::PairReject {
+                    magic: MAGIC.into(),
+                    version: VERSION,
+                    reason: "local authorization denied or unavailable".into(),
+                }
             }
         }
         Ok(_) => Packet::PairReject {
@@ -295,6 +366,22 @@ fn initiate_pair(peer: SocketAddr, device: &Device) -> Result<()> {
     send_packet(&mut stream, &hello)?;
     stream.shutdown(Shutdown::Write)?;
     let response = decode_frame(&read_frame(&mut stream)?, now())?;
+    if let Packet::PairAccept {
+        nonce, identity, ..
+    } = &response
+    {
+        let Packet::PairHello {
+            nonce: expected_nonce,
+            ..
+        } = &hello
+        else {
+            unreachable!()
+        };
+        if nonce != expected_nonce {
+            bail!("pair response nonce mismatch");
+        }
+        record_trusted(identity, &response)?;
+    }
     eprintln!("pair response from {peer}: {response:?}");
     Ok(())
 }
@@ -422,6 +509,7 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         unsafe {
             env::set_var("OMARCHY_SYNCD_STATE_DIR", state.path());
+            env::set_var("OMARCHY_SYNCD_AUTO_APPROVE", "1");
         }
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let address = listener.local_addr().unwrap();
@@ -430,10 +518,10 @@ mod tests {
         send_packet(&mut client, &hello(now())).unwrap();
         client.shutdown(Shutdown::Write).unwrap();
         let response = decode_frame(&read_frame(&mut client).unwrap(), now()).unwrap();
-        assert!(matches!(response, Packet::PairReject { .. }));
+        assert!(matches!(response, Packet::PairAccept { .. }));
         server.join().unwrap();
         assert_eq!(
-            fs::read_dir(state.path().join("pending")).unwrap().count(),
+            fs::read_dir(state.path().join("trusted")).unwrap().count(),
             1
         );
     }
