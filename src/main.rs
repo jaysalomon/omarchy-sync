@@ -552,6 +552,28 @@ fn append_unique(path: &Path, line: &str, marker: &str, mode: u32) -> Result<()>
     Ok(())
 }
 
+fn upsert_managed_line(path: &Path, line: &str, marker: &str, mode: u32) -> Result<()> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let mut output = Vec::new();
+    let mut replaced = false;
+    for entry in existing.lines() {
+        if entry.contains(marker) {
+            if !replaced {
+                output.push(line.to_string());
+                replaced = true;
+            }
+        } else {
+            output.push(entry.to_string());
+        }
+    }
+    if !replaced {
+        output.push(line.to_string());
+    }
+    fs::write(path, format!("{}\n", output.join("\n")))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    Ok(())
+}
+
 fn establish_ssh_trust(
     device: &str,
     address: SocketAddr,
@@ -577,7 +599,7 @@ fn establish_ssh_trust(
         0o600,
     )?;
     let known_marker = format!("# omarchy-sync:{safe_device}");
-    append_unique(
+    upsert_managed_line(
         &directory.join("known_hosts"),
         &format!(
             "{} {} {known_marker}",
@@ -923,6 +945,12 @@ mod tests {
         unsafe {
             env::set_var("OMARCHY_SYNCD_SSH_DIR", &ssh);
         }
+        fs::create_dir_all(&ssh).unwrap();
+        fs::write(
+            ssh.join("known_hosts"),
+            "[192.168.0.157]:22 ssh-ed25519 OLD # omarchy-sync:laptop\n",
+        )
+        .unwrap();
         establish_ssh_trust(
             "laptop",
             "192.168.0.157:49321".parse().unwrap(),
@@ -933,6 +961,7 @@ mod tests {
         let known_hosts = fs::read_to_string(ssh.join("known_hosts")).unwrap();
         assert!(known_hosts.starts_with("192.168.0.157 ssh-ed25519 "));
         assert!(!known_hosts.contains("[192.168.0.157]:22"));
+        assert!(!known_hosts.contains(" OLD "));
     }
     #[test]
     fn accepts_only_safe_theme_names() {
