@@ -5,6 +5,7 @@ This is intentionally an enrollment service, not a general remote shell.
 The peer must still pass local authorization before its SSH identity is trusted.
 """
 import json
+import hashlib
 import os
 import secrets
 import socket
@@ -111,13 +112,24 @@ def trust_peer(msg):
             handle.write(f"{msg['ssh_public_key']} {marker}\n")
 
 
+def is_trusted(msg):
+    peer = TRUST / f"{msg['device']}.json"
+    if not peer.exists():
+        return False
+    try:
+        saved = json.loads(peer.read_text())
+        return saved.get("ssh_public_key") == msg.get("ssh_public_key")
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def handle(conn, address):
     raw = conn.recv(MAX_FRAME + 1)
     try:
         msg = parse_hello(raw)
         if already_seen(msg["nonce"]):
             raise ValueError("replayed packet")
-        if not local_authorize(msg["device"]):
+        if not is_trusted(msg) and not local_authorize(msg["device"]):
             raise ValueError("local authorization denied")
         trust_peer(msg)
         reply = {"magic": MAGIC, "version": VERSION, "type": "PAIR_ACCEPT", "nonce": msg["nonce"], "device": socket.gethostname()}
@@ -144,6 +156,8 @@ def send_hello(address):
 
 def discovery_loop():
     device = socket.gethostname()
+    public_key = local_public_key()
+    identity = hashlib.sha256(public_key.encode()).hexdigest()[:16]
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -151,13 +165,14 @@ def discovery_loop():
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(("", PORT))
                 sock.settimeout(15)
-                announce = {"magic": MAGIC, "version": VERSION, "type": "DISCOVER", "timestamp": int(time.time()), "device": device}
+                announce = {"magic": MAGIC, "version": VERSION, "type": "DISCOVER", "timestamp": int(time.time()), "device": device, "identity": identity}
                 sock.sendto(json.dumps(announce).encode(), ("255.255.255.255", PORT))
                 while True:
                     raw, address = sock.recvfrom(2048)
                     try:
                         peer = parse_discovery(raw)
-                        if peer["device"] != device and device < peer["device"]:
+                        peer_identity = peer.get("identity", "")
+                        if peer["identity"] != identity and (device, identity) < (peer["device"], peer_identity):
                             threading.Thread(target=send_hello, args=(address[0],), daemon=True).start()
                     except (ValueError, json.JSONDecodeError):
                         continue
