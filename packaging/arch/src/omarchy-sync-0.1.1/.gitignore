@@ -1,0 +1,6 @@
+capabilities/
+conflicts/
+*.env
+__pycache__/
+*.pyc
+target/

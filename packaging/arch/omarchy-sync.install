@@ -1,17 +1,11 @@
 post_install() {
-  systemctl daemon-reload
-  systemctl enable --now omarchy-syncd.service
+  systemctl --global enable omarchy-syncd.service
 }
 
 post_upgrade() {
-  systemctl daemon-reload
-  systemctl try-restart omarchy-syncd.service
+  systemctl --global enable omarchy-syncd.service
 }
 
 pre_remove() {
-  systemctl disable --now omarchy-syncd.service
-}
-
-post_remove() {
-  systemctl daemon-reload
+  systemctl --global disable omarchy-syncd.service
 }

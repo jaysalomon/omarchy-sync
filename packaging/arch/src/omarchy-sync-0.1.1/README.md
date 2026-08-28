@@ -15,7 +15,7 @@ The runtime path is the Arch package, built from a GitHub release artifact:
 sudo pacman -U omarchy-sync-*.pkg.tar.zst
 ```
 
-Pacman installs the compiled binary, user service, and polkit policy. The
+Pacman installs the compiled binary, system service, and polkit policy. The
 service starts automatically; no peer IP, pairing command, key copy, Cargo, or
 source checkout is required at runtime.
 

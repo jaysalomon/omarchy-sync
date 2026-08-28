@@ -1,0 +1,10 @@
+# Copy to ~/.config/omarchy-sync/config
+sync_root=$HOME/Sync/OmarchySync
+peer_name=
+peer_address=
+peer_user=
+sync_backend=auto
+poll_seconds=30
+
+# Space-separated relative paths under $HOME to include after pairing.
+sync_paths=".config/omarchy .config/hypr .config/alacritty .config/kitty .config/ghostty .config/foot .config/starship.toml .config/lazygit Projects Work"
