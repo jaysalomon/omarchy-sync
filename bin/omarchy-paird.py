@@ -164,18 +164,23 @@ def discovery_loop():
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(("", PORT))
-                sock.settimeout(15)
-                announce = {"magic": MAGIC, "version": VERSION, "type": "DISCOVER", "timestamp": int(time.time()), "device": device, "identity": identity}
-                sock.sendto(json.dumps(announce).encode(), ("255.255.255.255", PORT))
                 while True:
-                    raw, address = sock.recvfrom(2048)
-                    try:
-                        peer = parse_discovery(raw)
-                        peer_identity = peer.get("identity", "")
-                        if peer["identity"] != identity and (device, identity) < (peer["device"], peer_identity):
-                            threading.Thread(target=send_hello, args=(address[0],), daemon=True).start()
-                    except (ValueError, json.JSONDecodeError):
-                        continue
+                    announce = {"magic": MAGIC, "version": VERSION, "type": "DISCOVER", "timestamp": int(time.time()), "device": device, "identity": identity}
+                    sock.sendto(json.dumps(announce).encode(), ("255.255.255.255", PORT))
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        sock.settimeout(max(0.1, deadline - time.monotonic()))
+                        try:
+                            raw, address = sock.recvfrom(2048)
+                        except socket.timeout:
+                            break
+                        try:
+                            peer = parse_discovery(raw)
+                            peer_identity = peer.get("identity", "")
+                            if peer_identity and peer_identity != identity and (device, identity) < (peer["device"], peer_identity):
+                                threading.Thread(target=send_hello, args=(address[0],), daemon=True).start()
+                        except (ValueError, json.JSONDecodeError):
+                            continue
         except OSError:
             time.sleep(15)
 
