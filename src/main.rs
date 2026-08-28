@@ -580,7 +580,7 @@ fn establish_ssh_trust(
     append_unique(
         &directory.join("known_hosts"),
         &format!(
-            "[{}]:22 {} {known_marker}",
+            "{} {} {known_marker}",
             address.ip(),
             key_without_comment(host_key)?
         ),
@@ -914,6 +914,25 @@ mod tests {
         assert_eq!(identity_for("key"), identity_for("key"));
         assert_ne!(identity_for("key"), identity_for("other"));
         assert_eq!(identity_for("key").len(), 32);
+    }
+
+    #[test]
+    fn ssh_trust_uses_plain_host_for_default_port() {
+        let state = tempfile::tempdir().unwrap();
+        let ssh = state.path().join("ssh");
+        unsafe {
+            env::set_var("OMARCHY_SYNCD_SSH_DIR", &ssh);
+        }
+        establish_ssh_trust(
+            "laptop",
+            "192.168.0.157:49321".parse().unwrap(),
+            "ssh-ed25519 AAAAC3Nza peer",
+            "ssh-ed25519 AAAAC3Nza host",
+        )
+        .unwrap();
+        let known_hosts = fs::read_to_string(ssh.join("known_hosts")).unwrap();
+        assert!(known_hosts.starts_with("192.168.0.157 ssh-ed25519 "));
+        assert!(!known_hosts.contains("[192.168.0.157]:22"));
     }
     #[test]
     fn accepts_only_safe_theme_names() {
