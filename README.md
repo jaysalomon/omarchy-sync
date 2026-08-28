@@ -5,7 +5,7 @@ Seamless multi-machine continuity for Omarchy.
 The production implementation is now being built as the compiled Rust system
 daemon `omarchy-syncd`. See `docs/ACCEPTANCE.md` for the non-negotiable product
 flow and test gates. The scripts under `bin/` are retained as the original
-protocol experiment and are not the production architecture.
+protocol experiment and are not part of the production tree.
 
 ## Laptop test build
 
