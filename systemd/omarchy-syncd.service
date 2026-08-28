@@ -9,6 +9,8 @@ Type=simple
 ExecStart=/usr/lib/omarchy-sync/omarchy-syncd
 Restart=on-failure
 RestartSec=5
+PrivateTmp=true
+ProtectSystem=full
 
 [Install]
 WantedBy=default.target

@@ -4,23 +4,39 @@ configure_firewall() {
   if command -v ufw >/dev/null && ufw status | grep -q '^Status: active' && [[ -n "$lan_cidr" ]]; then
     ufw allow from "$lan_cidr" to any port 49321 proto tcp comment 'OmarchySync pairing'
     ufw allow from "$lan_cidr" to any port 49321 proto udp comment 'OmarchySync discovery'
+    ufw allow from "$lan_cidr" to any port 22 proto tcp comment 'OmarchySync SSH'
+    ufw reload
+  fi
+}
+
+remove_firewall() {
+  local lan_cidr
+  lan_cidr="$(ip -4 route show scope link | awk '$1 ~ /\// {print $1; exit}')"
+  if command -v ufw >/dev/null && ufw status | grep -q '^Status: active' && [[ -n "$lan_cidr" ]]; then
+    ufw --force delete allow from "$lan_cidr" to any port 49321 proto tcp
+    ufw --force delete allow from "$lan_cidr" to any port 49321 proto udp
+    ufw --force delete allow from "$lan_cidr" to any port 22 proto tcp
     ufw reload
   fi
 }
 
 post_install() {
   configure_firewall
+  ssh-keygen -A
+  systemctl enable --now sshd.service
   systemctl --global enable omarchy-syncd.service
-  systemctl --global enable omarchy-sync-polkit-agent.service
+  systemctl --global enable hyprpolkitagent.service
 }
 
 post_upgrade() {
   configure_firewall
+  ssh-keygen -A
+  systemctl enable --now sshd.service
   systemctl --global enable omarchy-syncd.service
-  systemctl --global enable omarchy-sync-polkit-agent.service
+  systemctl --global enable hyprpolkitagent.service
 }
 
 pre_remove() {
+  remove_firewall
   systemctl --global disable omarchy-syncd.service
-  systemctl --global disable omarchy-sync-polkit-agent.service
 }

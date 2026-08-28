@@ -15,7 +15,8 @@ The runtime path is the Arch package, built from a GitHub release artifact:
 ./install.sh
 ```
 
-Pacman installs the compiled binary, user service, and polkit policy. The
+Pacman installs the compiled binary, user service, Polkit policy, SSH service,
+and Omarchy authentication agent. The
 service starts automatically and configures LAN-scoped UFW access when UFW is
 active; no peer IP, pairing command, key copy, Cargo, or source checkout is
 required at runtime. An untrusted peer is retried automatically until the
@@ -35,33 +36,23 @@ It will not overwrite existing Omarchy configuration automatically.
 
 ## One-touch pairing
 
-`omarchy-paird` listens on the fixed OmarchySync enrollment port `49321`.
+`omarchy-syncd` listens on the fixed OmarchySync enrollment port `49321`.
 It accepts only a bounded `PAIR_HELLO` frame with a fresh nonce, timestamp,
 device name, and SSH public key. It then invokes the local PAM/polkit stack.
 On a fingerprint-enabled machine, that is the one-touch trust confirmation.
 
-Only after local authorization does it record the peer and add its SSH identity.
+Only after local authorization does it record the peer, authorize the peer's
+dedicated OmarchySync SSH key, and pin the peer's SSH host key.
 The pairing daemon is not a remote shell and does not transmit passwords or
 fingerprint data. The next iteration will add mutual session keys, revocation,
 and privilege certificates for the trusted Omarchy cluster.
 
 ## Quick start
 
-```bash
-./install.sh
-./bin/omarchy-sync capabilities
-systemctl --user status omarchy-sync.service
-```
-
-On the second machine, download this repository and run `./install.sh`. From
-the first machine, initiate the one-touch pairing with:
-
-```bash
-./bin/omarchy-sync pair 192.168.0.215
-```
-
-The receiving machine performs local PAM/polkit authentication and creates the
-SSH trust entry itself. No SSH key needs to be copied beforehand.
+Install the Arch package on both machines and log in normally. There are no
+pairing commands. The machines discover each other, elect one pairing
+initiator, show one local OS authentication prompt, and establish mutual SSH
+trust automatically.
 
 When both daemons are running on the same LAN, they automatically announce and
 discover each other. A deterministic device election prevents duplicate
@@ -69,16 +60,9 @@ prompts; the selected receiver performs the one-time local authorization
 without requiring the user to provide an IP address or tell another machine to
 begin.
 
-Set the remote machine in `~/.config/omarchy-sync/config` after pairing:
-
-```text
-peer_name=omarchy-laptop
-peer_address=omarchy-laptop.local
-peer_user=jay
-```
-
-The initial pairing should use SSH keys and a deliberate review of the folders
-to synchronize. After that, the service is designed to run unattended.
+The relationship is stored under the user's state directory and survives
+logout, reboot, and temporary network loss. No hostnames, IP addresses, or key
+copying are required.
 
 ## Sync boundaries
 

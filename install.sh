@@ -19,6 +19,8 @@ fi
 
 sudo pacman -U --noconfirm "$PACKAGE_FILE"
 systemctl --user daemon-reload
-systemctl --user enable --now omarchy-syncd.service
+systemctl --user enable --now hyprpolkitagent.service
+systemctl --user enable omarchy-syncd.service
+systemctl --user restart omarchy-syncd.service
 
 echo "OmarchySync is installed and running. Discovery begins automatically."

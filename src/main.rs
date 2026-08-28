@@ -4,28 +4,28 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAGIC: &str = "OMARCHYSYNC";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const DEFAULT_PORT: u16 = 49_321;
 const MAX_FRAME: usize = 4096;
 const TTL_SECONDS: u64 = 90;
-const AUTH_COOLDOWN_SECONDS: u64 = 15;
-
-static LAST_AUTHORIZATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 struct Device {
     name: String,
     identity: String,
     public_key: String,
+    host_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,6 +47,7 @@ enum Packet {
         device: String,
         identity: String,
         public_key: String,
+        host_key: String,
         scopes: Vec<String>,
     },
     PairAccept {
@@ -56,6 +57,7 @@ enum Packet {
         device: String,
         identity: String,
         public_key: String,
+        host_key: String,
     },
     PairReject {
         magic: String,
@@ -84,23 +86,74 @@ fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
         .map(|value| value.trim().to_string())
 }
 
-fn load_device() -> Device {
+fn state_dir() -> PathBuf {
+    env::var_os("OMARCHY_SYNCD_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("/var/lib"))
+                        .join(".local/state")
+                })
+                .join("omarchy-sync")
+        })
+}
+
+fn ssh_dir() -> PathBuf {
+    env::var_os("OMARCHY_SYNCD_SSH_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/var/lib/omarchy-sync"))
+                .join(".ssh")
+        })
+}
+
+fn ensure_sync_public_key(name: &str) -> Result<String> {
+    let directory = state_dir().join("ssh");
+    let private_key = directory.join("id_ed25519");
+    let public_key = directory.join("id_ed25519.pub");
+    fs::create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    if !public_key.exists() {
+        let status = Command::new("/usr/bin/ssh-keygen")
+            .arg("-q")
+            .arg("-t")
+            .arg("ed25519")
+            .arg("-f")
+            .arg(&private_key)
+            .arg("-N")
+            .arg("")
+            .arg("-C")
+            .arg(format!("omarchy-sync@{name}"))
+            .status()
+            .context("failed to start ssh-keygen")?;
+        if !status.success() {
+            bail!("ssh-keygen failed");
+        }
+    }
+    read_trimmed(public_key).context("missing OmarchySync SSH public key")
+}
+
+fn load_device() -> Result<Device> {
     let name = read_trimmed("/etc/hostname")
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "omarchy".into());
     let machine_id = read_trimmed("/etc/machine-id").unwrap_or_else(|| name.clone());
-    let public_key = read_trimmed("/etc/ssh/ssh_host_ed25519_key.pub").unwrap_or_else(|| {
-        format!(
-            "ssh-ed25519 {} omarchy-syncd@{name}",
-            identity_for(&machine_id)
-        )
-    });
-    let identity = identity_for(&format!("{machine_id}:{public_key}"));
-    Device {
+    let public_key = ensure_sync_public_key(&name)?;
+    let host_key =
+        read_trimmed("/etc/ssh/ssh_host_ed25519_key.pub").context("missing SSH host key")?;
+    let identity = identity_for(&format!("{machine_id}:{host_key}"));
+    Ok(Device {
         name,
         identity,
         public_key,
-    }
+        host_key,
+    })
 }
 
 fn nonce() -> Result<String> {
@@ -138,6 +191,7 @@ fn validate(packet: &Packet, current_time: u64) -> Result<()> {
             device,
             identity,
             public_key,
+            host_key,
             ..
         } => {
             if magic != MAGIC
@@ -147,6 +201,7 @@ fn validate(packet: &Packet, current_time: u64) -> Result<()> {
                 || identity.len() != 32
                 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit())
                 || !public_key.starts_with("ssh-ed25519 ")
+                || !host_key.starts_with("ssh-ed25519 ")
             {
                 bail!("invalid response header");
             }
@@ -174,6 +229,7 @@ fn validate(packet: &Packet, current_time: u64) -> Result<()> {
     if let Packet::PairHello {
         nonce,
         public_key,
+        host_key,
         scopes,
         ..
     } = packet
@@ -183,6 +239,9 @@ fn validate(packet: &Packet, current_time: u64) -> Result<()> {
         }
         if !public_key.starts_with("ssh-ed25519 ") || public_key.contains(['\n', '\r']) {
             bail!("invalid public key");
+        }
+        if !host_key.starts_with("ssh-ed25519 ") || host_key.contains(['\n', '\r']) {
+            bail!("invalid host key");
         }
         if scopes.is_empty() || scopes.len() > 8 {
             bail!("invalid scopes");
@@ -222,20 +281,7 @@ fn send_packet(stream: &mut TcpStream, packet: &Packet) -> Result<()> {
 }
 
 fn pending_dir() -> PathBuf {
-    env::var_os("OMARCHY_SYNCD_STATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            env::var_os("XDG_STATE_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    env::var_os("HOME")
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| PathBuf::from("/var/lib"))
-                        .join(".local/state")
-                })
-                .join("omarchy-sync")
-        })
-        .join("pending")
+    state_dir().join("pending")
 }
 
 fn trusted_dir() -> PathBuf {
@@ -243,6 +289,19 @@ fn trusted_dir() -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("/var/lib/omarchy-sync"))
         .join("trusted")
+}
+
+fn claim_nonce(nonce: &str) -> Result<()> {
+    let directory = state_dir().join("nonces");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join(nonce);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .context("replayed pairing nonce")?;
+    writeln!(file, "{}", now())?;
+    Ok(())
 }
 
 fn record_pending(packet: &Packet) -> Result<()> {
@@ -258,42 +317,139 @@ fn record_pending(packet: &Packet) -> Result<()> {
     Ok(())
 }
 
-fn record_trusted(identity: &str, packet: &Packet) -> Result<()> {
+fn key_without_comment(key: &str) -> Result<String> {
+    let mut fields = key.split_whitespace();
+    let algorithm = fields.next().context("missing SSH key algorithm")?;
+    let value = fields.next().context("missing SSH key value")?;
+    if algorithm != "ssh-ed25519" || value.is_empty() {
+        bail!("unsupported SSH key");
+    }
+    Ok(format!("{algorithm} {value}"))
+}
+
+fn append_unique(path: &Path, line: &str, marker: &str, mode: u32) -> Result<()> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    if existing.lines().any(|entry| entry.contains(marker)) {
+        return Ok(());
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{line}")?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    Ok(())
+}
+
+fn establish_ssh_trust(
+    device: &str,
+    address: SocketAddr,
+    public_key: &str,
+    host_key: &str,
+) -> Result<()> {
+    let directory = ssh_dir();
+    fs::create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let safe_device: String = device
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(64)
+        .collect();
+    if safe_device.is_empty() {
+        bail!("invalid SSH peer name");
+    }
+    let authorized_marker = format!("omarchy-sync:{safe_device}");
+    append_unique(
+        &directory.join("authorized_keys"),
+        &format!("{} {authorized_marker}", key_without_comment(public_key)?),
+        &authorized_marker,
+        0o600,
+    )?;
+    let known_marker = format!("# omarchy-sync:{safe_device}");
+    append_unique(
+        &directory.join("known_hosts"),
+        &format!(
+            "[{}]:22 {} {known_marker}",
+            address.ip(),
+            key_without_comment(host_key)?
+        ),
+        &known_marker,
+        0o600,
+    )
+}
+
+fn record_trusted(identity: &str, packet: &Packet, address: SocketAddr) -> Result<()> {
+    let (device, public_key, host_key) = match packet {
+        Packet::PairHello {
+            device,
+            public_key,
+            host_key,
+            ..
+        }
+        | Packet::PairAccept {
+            device,
+            public_key,
+            host_key,
+            ..
+        } => (device, public_key, host_key),
+        _ => bail!("cannot trust non-pairing packet"),
+    };
     let directory = trusted_dir();
     fs::create_dir_all(&directory)?;
     fs::write(
         directory.join(format!("{identity}.json")),
         serde_json::to_vec_pretty(packet)?,
     )?;
-    Ok(())
+    establish_ssh_trust(device, address, public_key, host_key)
 }
 
 fn is_trusted(identity: &str) -> bool {
     trusted_dir().join(format!("{identity}.json")).exists()
 }
 
+fn packet_keys(packet: &Packet) -> Option<(&str, &str, &str)> {
+    match packet {
+        Packet::PairHello {
+            identity,
+            public_key,
+            host_key,
+            ..
+        }
+        | Packet::PairAccept {
+            identity,
+            public_key,
+            host_key,
+            ..
+        } => Some((identity, public_key, host_key)),
+        _ => None,
+    }
+}
+
+fn packet_matches_trust(identity: &str, packet: &Packet) -> bool {
+    let Ok(bytes) = fs::read(trusted_dir().join(format!("{identity}.json"))) else {
+        return false;
+    };
+    let Ok(saved) = serde_json::from_slice::<Packet>(&bytes) else {
+        return false;
+    };
+    packet_keys(&saved) == packet_keys(packet)
+}
+
 fn local_authorize(device: &str) -> bool {
     if env::var("OMARCHY_SYNCD_AUTO_APPROVE").as_deref() == Ok("1") {
         return true;
     }
-    let current = now();
-    let previous = LAST_AUTHORIZATION.load(Ordering::Relaxed);
-    if current.saturating_sub(previous) < AUTH_COOLDOWN_SECONDS
-        || LAST_AUTHORIZATION
-            .compare_exchange(previous, current, Ordering::Relaxed, Ordering::Relaxed)
-            .is_err()
-    {
-        return false;
-    }
     eprintln!("local authorization requested for {device}");
-    std::process::Command::new("pkexec")
-        .arg("/usr/bin/true")
+    std::process::Command::new("/usr/bin/pkcheck")
+        .arg("--action-id")
+        .arg("org.omarchy.sync.pair")
+        .arg("--process")
+        .arg(std::process::id().to_string())
+        .arg("--allow-user-interaction")
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
 }
 
 fn handle_tcp(mut stream: TcpStream) -> Result<()> {
+    let peer = stream.peer_addr()?;
     let frame = read_frame(&mut stream)?;
     let response = match decode_frame(&frame, now()) {
         Ok(packet @ Packet::PairHello { .. }) => {
@@ -307,9 +463,15 @@ fn handle_tcp(mut stream: TcpStream) -> Result<()> {
                 unreachable!();
             };
             eprintln!("pair request received: device={device} identity={identity}");
-            if is_trusted(identity) || local_authorize(device) {
-                record_trusted(identity, &packet)?;
-                let local = load_device();
+            if let Err(error) = claim_nonce(nonce) {
+                Packet::PairReject {
+                    magic: MAGIC.into(),
+                    version: VERSION,
+                    reason: error.to_string(),
+                }
+            } else if packet_matches_trust(identity, &packet) || local_authorize(device) {
+                record_trusted(identity, &packet, peer)?;
+                let local = load_device()?;
                 Packet::PairAccept {
                     magic: MAGIC.into(),
                     version: VERSION,
@@ -317,6 +479,7 @@ fn handle_tcp(mut stream: TcpStream) -> Result<()> {
                     device: local.name,
                     identity: local.identity,
                     public_key: local.public_key,
+                    host_key: local.host_key,
                 }
             } else {
                 record_pending(&packet)?;
@@ -347,11 +510,9 @@ fn run_tcp(port: u16) -> Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(move || {
-                    if let Err(error) = handle_tcp(stream) {
-                        eprintln!("pair connection failed: {error:#}");
-                    }
-                });
+                if let Err(error) = handle_tcp(stream) {
+                    eprintln!("pair connection failed: {error:#}");
+                }
             }
             Err(error) => eprintln!("TCP accept error: {error}"),
         }
@@ -369,6 +530,7 @@ fn initiate_pair(peer: SocketAddr, device: &Device) -> Result<()> {
         device: device.name.clone(),
         identity: device.identity.clone(),
         public_key: device.public_key.clone(),
+        host_key: device.host_key.clone(),
         scopes: vec![
             "sync".into(),
             "ssh".into(),
@@ -393,7 +555,7 @@ fn initiate_pair(peer: SocketAddr, device: &Device) -> Result<()> {
         if nonce != expected_nonce {
             bail!("pair response nonce mismatch");
         }
-        record_trusted(identity, &response)?;
+        record_trusted(identity, &response, peer)?;
     }
     eprintln!("pair response from {peer}: {response:?}");
     Ok(())
@@ -473,7 +635,7 @@ fn main() -> Result<()> {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_PORT);
-    let device = Arc::new(load_device());
+    let device = Arc::new(load_device()?);
     eprintln!(
         "omarchy-syncd starting: device={} identity={}",
         device.name, device.identity
@@ -500,6 +662,7 @@ mod tests {
             device: "laptop".into(),
             identity: "b".repeat(32),
             public_key: "ssh-ed25519 AAAAC3Nza test".into(),
+            host_key: "ssh-ed25519 AAAAC3Nza host".into(),
             scopes: vec!["sync".into(), "ssh".into()],
         }
     }
@@ -531,20 +694,30 @@ mod tests {
         assert_eq!(identity_for("key").len(), 32);
     }
     #[test]
-    fn tcp_handler_records_pending_request() {
+    fn tcp_handler_records_trust_and_rejects_replay() {
         let state = tempfile::tempdir().unwrap();
         unsafe {
             env::set_var("OMARCHY_SYNCD_STATE_DIR", state.path());
+            env::set_var("OMARCHY_SYNCD_SSH_DIR", state.path().join("ssh-home"));
             env::set_var("OMARCHY_SYNCD_AUTO_APPROVE", "1");
         }
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || handle_tcp(listener.accept().unwrap().0).unwrap());
+        let server = thread::spawn(move || {
+            handle_tcp(listener.accept().unwrap().0).unwrap();
+            handle_tcp(listener.accept().unwrap().0).unwrap();
+        });
+        let request = hello(now());
         let mut client = TcpStream::connect(address).unwrap();
-        send_packet(&mut client, &hello(now())).unwrap();
+        send_packet(&mut client, &request).unwrap();
         client.shutdown(Shutdown::Write).unwrap();
         let response = decode_frame(&read_frame(&mut client).unwrap(), now()).unwrap();
         assert!(matches!(response, Packet::PairAccept { .. }));
+        let mut replay = TcpStream::connect(address).unwrap();
+        send_packet(&mut replay, &request).unwrap();
+        replay.shutdown(Shutdown::Write).unwrap();
+        let response = decode_frame(&read_frame(&mut replay).unwrap(), now()).unwrap();
+        assert!(matches!(response, Packet::PairReject { .. }));
         server.join().unwrap();
         assert_eq!(
             fs::read_dir(state.path().join("trusted")).unwrap().count(),
