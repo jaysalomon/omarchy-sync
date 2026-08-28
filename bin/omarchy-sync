@@ -96,6 +96,7 @@ case "${1:-status}" in
   status) status ;;
   sync) sync_once ;;
   daemon) daemon ;;
+  pair) exec "$(dirname "$0")/omarchy-sync-pair.py" "${2:?peer address required}" "${3:-49321}" ;;
   install-service) install_service ;;
-  *) printf 'Usage: %s {init|capabilities|status|sync|daemon|install-service}\n' "$NAME" >&2; exit 2 ;;
+  *) printf 'Usage: %s {init|capabilities|status|sync|daemon|pair|install-service}\n' "$NAME" >&2; exit 2 ;;
 esac

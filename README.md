@@ -29,11 +29,20 @@ and privilege certificates for the trusted Omarchy cluster.
 ## Quick start
 
 ```bash
-./bin/omarchy-sync init
+./install.sh
 ./bin/omarchy-sync capabilities
-./bin/omarchy-sync install-service
 systemctl --user status omarchy-sync.service
 ```
+
+On the second machine, download this repository and run `./install.sh`. From
+the first machine, initiate the one-touch pairing with:
+
+```bash
+./bin/omarchy-sync pair 192.168.0.215
+```
+
+The receiving machine performs local PAM/polkit authentication and creates the
+SSH trust entry itself. No SSH key needs to be copied beforehand.
 
 Set the remote machine in `~/.config/omarchy-sync/config` after pairing:
 
