@@ -57,3 +57,15 @@ revoked independently:
 
 The future privileged layer, if one exists, must be separate from these user
 capabilities and require its own local authorization and revocation controls.
+
+## Theme synchronization
+
+Theme continuity is the first data-layer capability. On pairing, the daemon
+persists the trusted peer's last discovered LAN endpoint. It watches
+`~/.local/state/omarchy/current/theme.name`; when that value changes to a safe
+theme slug, it connects through the paired Ed25519 SSH identity and runs
+Omarchy's headless theme apply command on each trusted peer.
+
+The remote Omarchy command remains the policy authority: it only applies a
+theme that exists there. This release intentionally synchronizes selection, not
+custom theme directories, backgrounds, or general desktop configuration.

@@ -33,5 +33,9 @@ The following are product failures, not documented setup steps:
   generic root authorization.
 - SSH accepts only the approved managed key for the paired user; password and
   root SSH login are disabled by the package configuration.
+- Changing to an already-installed Omarchy theme on one trusted machine applies
+  that same theme on its trusted peer without copying arbitrary configuration.
+- A missing or unsafe theme name does not modify the peer and is reported in
+  the daemon journal.
 - SSH, synchronization, mounts, and privileged work are separately tested when
   those layers are implemented.

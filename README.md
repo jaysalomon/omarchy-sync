@@ -34,6 +34,19 @@ This first prototype provides:
 The service is deliberately non-destructive until the second machine is paired.
 It will not overwrite existing Omarchy configuration automatically.
 
+## Theme continuity
+
+After two machines are paired, a deliberate Omarchy theme change on either
+machine is applied to its trusted peers automatically. OmarchySync watches the
+active theme name and invokes Omarchy's own theme command remotely over the
+paired key-only SSH channel; it does not copy arbitrary desktop configuration.
+
+The first layer synchronizes theme **selection** for themes already installed
+on both machines. A missing custom theme is rejected safely by Omarchy and is
+logged; custom theme assets and backgrounds will be the next extension. Monitor
+layouts, input settings, private keys, browser data, and other machine-local
+state remain local.
+
 ## One-touch pairing
 
 `omarchy-syncd` listens on the fixed OmarchySync enrollment port `49321`.

@@ -19,6 +19,7 @@ const VERSION: u8 = 2;
 const DEFAULT_PORT: u16 = 49_321;
 const MAX_FRAME: usize = 4096;
 const TTL_SECONDS: u64 = 90;
+const THEME_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 struct Device {
@@ -26,6 +27,12 @@ struct Device {
     identity: String,
     public_key: String,
     host_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct TrustedPeer {
+    identity: String,
+    address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -291,6 +298,111 @@ fn trusted_dir() -> PathBuf {
         .join("trusted")
 }
 
+fn peers_dir() -> PathBuf {
+    state_dir().join("peers")
+}
+
+fn record_peer(identity: &str, address: SocketAddr) -> Result<()> {
+    let directory = peers_dir();
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        directory.join(format!("{identity}.json")),
+        serde_json::to_vec_pretty(&TrustedPeer {
+            identity: identity.into(),
+            address,
+        })?,
+    )?;
+    Ok(())
+}
+
+fn trusted_peers() -> Vec<TrustedPeer> {
+    let Ok(entries) = fs::read_dir(peers_dir()) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| fs::read(entry.path()).ok())
+        .filter_map(|bytes| serde_json::from_slice::<TrustedPeer>(&bytes).ok())
+        .filter(|peer| is_trusted(&peer.identity))
+        .collect()
+}
+
+fn current_theme() -> Option<String> {
+    let path = env::var_os("OMARCHY_SYNCD_THEME_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/var/lib/omarchy-sync"))
+                .join(".local/state/omarchy/current/theme.name")
+        });
+    read_trimmed(path).filter(|theme| valid_theme_name(theme))
+}
+
+fn valid_theme_name(theme: &str) -> bool {
+    !theme.is_empty()
+        && theme.len() <= 64
+        && theme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn sync_theme(peer: &TrustedPeer, theme: &str) -> Result<()> {
+    if !valid_theme_name(theme) {
+        bail!("invalid theme name");
+    }
+    let known_hosts = ssh_dir().join("known_hosts");
+    let status = Command::new("/usr/bin/ssh")
+        .args(["-i"])
+        .arg(state_dir().join("ssh/id_ed25519"))
+        .args([
+            "-p",
+            "22",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+        ])
+        .arg(format!("UserKnownHostsFile={}", known_hosts.display()))
+        .arg(peer.address.ip().to_string())
+        .arg(format!(
+            "OMARCHY_THEME_HEADLESS=1 omarchy theme set {theme}"
+        ))
+        .status()
+        .context("start theme sync SSH")?;
+    if !status.success() {
+        bail!("remote Omarchy theme apply failed");
+    }
+    Ok(())
+}
+
+fn run_theme_sync() {
+    let mut observed = current_theme();
+    loop {
+        thread::sleep(THEME_POLL_INTERVAL);
+        let next = current_theme();
+        if next == observed {
+            continue;
+        }
+        observed = next.clone();
+        let Some(theme) = next else {
+            continue;
+        };
+        for peer in trusted_peers() {
+            let theme = theme.clone();
+            thread::spawn(move || {
+                if let Err(error) = sync_theme(&peer, &theme) {
+                    eprintln!(
+                        "theme sync failed for {} at {}: {error:#}",
+                        peer.identity, peer.address
+                    );
+                }
+            });
+        }
+    }
+}
+
 fn claim_nonce(nonce: &str) -> Result<()> {
     let directory = state_dir().join("nonces");
     fs::create_dir_all(&directory)?;
@@ -397,7 +509,8 @@ fn record_trusted(identity: &str, packet: &Packet, address: SocketAddr) -> Resul
         directory.join(format!("{identity}.json")),
         serde_json::to_vec_pretty(packet)?,
     )?;
-    establish_ssh_trust(device, address, public_key, host_key)
+    establish_ssh_trust(device, address, public_key, host_key)?;
+    record_peer(identity, address)
 }
 
 fn is_trusted(identity: &str) -> bool {
@@ -605,8 +718,13 @@ fn run_discovery(port: u16, device: Arc<Device>) -> Result<()> {
                     "peer discovered: device={peer_name} identity={peer_identity} address={source}"
                 );
             }
+            let peer = SocketAddr::new(source.ip(), tcp_port);
+            if is_trusted(&peer_identity)
+                && let Err(error) = record_peer(&peer_identity, peer)
+            {
+                eprintln!("failed to refresh peer endpoint: {error:#}");
+            }
             if device.identity < peer_identity && !is_trusted(&peer_identity) {
-                let peer = SocketAddr::new(source.ip(), tcp_port);
                 let local = Arc::clone(&device);
                 let peer_id = peer_identity.clone();
                 let already_pairing = pairing
@@ -646,6 +764,7 @@ fn main() -> Result<()> {
             eprintln!("discovery failed: {error:#}");
         }
     });
+    thread::spawn(run_theme_sync);
     run_tcp(port)
 }
 
@@ -692,6 +811,15 @@ mod tests {
         assert_eq!(identity_for("key"), identity_for("key"));
         assert_ne!(identity_for("key"), identity_for("other"));
         assert_eq!(identity_for("key").len(), 32);
+    }
+    #[test]
+    fn accepts_only_safe_theme_names() {
+        assert!(valid_theme_name("nord"));
+        assert!(valid_theme_name("tokyo-night"));
+        assert!(valid_theme_name("my_theme"));
+        assert!(!valid_theme_name(""));
+        assert!(!valid_theme_name("../not-a-theme"));
+        assert!(!valid_theme_name("theme; command"));
     }
     #[test]
     fn tcp_handler_records_trust_and_rejects_replay() {
