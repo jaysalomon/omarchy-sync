@@ -1,0 +1,59 @@
+# Architecture and protocol
+
+## Components
+
+`omarchy-syncd` is a compiled Rust daemon launched as a systemd **user**
+service. A user service is intentional: pairing must request authentication in
+the logged-in graphical session so polkit/PAM can use the local password or
+fingerprint reader. It asks polkit specifically for the
+`org.omarchy.sync.pair` action; it does not elevate to a generic root shell.
+
+The Arch package owns installation, the systemd unit, the polkit policy, and
+LAN-scoped UFW configuration. Git and Cargo are not part of runtime operation.
+
+## Pairing flow
+
+```text
+login
+  → systemd user service starts
+  → UDP DISCOVER broadcast on 49321
+  → peer detected
+  → deterministic initiator opens TCP 49321
+  → PAIR_HELLO
+  → receiver requests local polkit/PAM approval
+  → PAIR_ACCEPT or PAIR_REJECT
+  → `identity` and `ssh` trust are persisted locally on both machines
+```
+
+Packets are bounded JSON frames with a magic value, protocol version,
+timestamp, device identity, and a one-time nonce for pair requests. The daemon
+rejects malformed, oversized, or stale packets.
+
+## Trust boundary
+
+Fingerprint data and passwords never leave the local machine. The current
+release grants `identity` and `ssh` scopes. The `ssh` scope creates a dedicated
+per-user Ed25519 key, authorizes that key only after local approval, pins the
+peer host key, and maintains a managed SSH profile. The package configures
+sshd for key-only, non-root access. It does not grant sudo, filesystem mounts,
+synchronization, or compute privileges.
+
+## Capability roadmap
+
+Identity trust is the root of the relationship, not blanket machine control.
+Each subsequent capability must be requested, persisted, inspected, and
+revoked independently:
+
+1. **SSH** — managed per-user keys and verified host identities, without a
+   manually copied key or address.
+2. **Data and code** — selected paths replicated through a conflict-aware
+   backend; secrets and machine-local state stay excluded.
+3. **Mounts** — approved directories exposed on demand, with no unrestricted
+   filesystem export.
+4. **Omarchy settings** — opt-in continuity for themes and other portable
+   configuration, never hardware-specific settings by default.
+5. **Compute** — explicit, auditable workload delegation; never implicit remote
+   sudo.
+
+The future privileged layer, if one exists, must be separate from these user
+capabilities and require its own local authorization and revocation controls.

@@ -7,7 +7,9 @@ OmarchySync is accepted only when this flow works:
 3. The machines discover one another without hostnames, IP addresses, or commands.
 4. Exactly one local trust prompt appears.
 5. A password or fingerprint approves the relationship through the local OS.
-6. SSH, synchronization, mounts, and capability discovery become available.
+6. `identity` and `ssh` trusted peer records are persisted on both machines.
+7. The paired user can use the generated SSH profile without copying a key or
+   entering an address; host-key verification remains enabled.
 7. The relationship survives logout, reboot, and temporary network loss.
 
 The following are product failures, not documented setup steps:
@@ -19,12 +21,17 @@ The following are product failures, not documented setup steps:
 - entering an IP address;
 - requiring a terminal after package installation;
 - silently granting trust without local authentication;
-- requiring Python or a user shell for the system daemon.
+- requiring Python, Cargo, or a source build at runtime.
 
 ## Test gates
 
 - Unit tests reject malformed, oversized, stale, and replayed packets.
 - Integration tests run two isolated peers and complete discovery automatically.
-- Firewall installation is LAN-scoped and removed on uninstall.
+- Firewall installation is LAN-scoped.
 - Pairing creates no trust state unless the authorization broker approves it.
-- A revoked peer cannot reconnect or request privileged work.
+- Pairing invokes the named `org.omarchy.sync.pair` polkit action rather than a
+  generic root authorization.
+- SSH accepts only the approved managed key for the paired user; password and
+  root SSH login are disabled by the package configuration.
+- SSH, synchronization, mounts, and privileged work are separately tested when
+  those layers are implemented.
