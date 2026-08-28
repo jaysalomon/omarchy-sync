@@ -11,13 +11,16 @@ configure_firewall() {
 post_install() {
   configure_firewall
   systemctl --global enable omarchy-syncd.service
+  systemctl --global enable omarchy-sync-polkit-agent.service
 }
 
 post_upgrade() {
   configure_firewall
   systemctl --global enable omarchy-syncd.service
+  systemctl --global enable omarchy-sync-polkit-agent.service
 }
 
 pre_remove() {
   systemctl --global disable omarchy-syncd.service
+  systemctl --global disable omarchy-sync-polkit-agent.service
 }

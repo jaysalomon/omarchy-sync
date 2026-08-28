@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,6 +17,9 @@ const VERSION: u8 = 1;
 const DEFAULT_PORT: u16 = 49_321;
 const MAX_FRAME: usize = 4096;
 const TTL_SECONDS: u64 = 90;
+const AUTH_COOLDOWN_SECONDS: u64 = 15;
+
+static LAST_AUTHORIZATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 struct Device {
@@ -272,6 +276,15 @@ fn local_authorize(device: &str) -> bool {
     if env::var("OMARCHY_SYNCD_AUTO_APPROVE").as_deref() == Ok("1") {
         return true;
     }
+    let current = now();
+    let previous = LAST_AUTHORIZATION.load(Ordering::Relaxed);
+    if current.saturating_sub(previous) < AUTH_COOLDOWN_SECONDS
+        || LAST_AUTHORIZATION
+            .compare_exchange(previous, current, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+    {
+        return false;
+    }
     eprintln!("local authorization requested for {device}");
     std::process::Command::new("pkexec")
         .arg("/usr/bin/true")
@@ -391,6 +404,7 @@ fn run_discovery(port: u16, device: Arc<Device>) -> Result<()> {
     socket.set_broadcast(true)?;
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
     let seen = Mutex::new(HashSet::<String>::new());
+    let pairing = Arc::new(Mutex::new(HashSet::<String>::new()));
     eprintln!(
         "UDP discovery active on 0.0.0.0:{port}; identity={}",
         device.identity
@@ -432,9 +446,21 @@ fn run_discovery(port: u16, device: Arc<Device>) -> Result<()> {
             if device.identity < peer_identity && !is_trusted(&peer_identity) {
                 let peer = SocketAddr::new(source.ip(), tcp_port);
                 let local = Arc::clone(&device);
+                let peer_id = peer_identity.clone();
+                let already_pairing = pairing
+                    .lock()
+                    .map(|mut active| !active.insert(peer_id.clone()))
+                    .unwrap_or(true);
+                if already_pairing {
+                    continue;
+                }
+                let active_pairings = Arc::clone(&pairing);
                 thread::spawn(move || {
                     if let Err(error) = initiate_pair(peer, &local) {
                         eprintln!("automatic pair attempt failed for {peer}: {error:#}");
+                    }
+                    if let Ok(mut active) = active_pairings.lock() {
+                        active.remove(&peer_id);
                     }
                 });
             }
