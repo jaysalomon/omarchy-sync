@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ $# -eq 2 ]] || { echo "usage: omarchy-sync-upgrade PEER PACKAGE" >&2; exit 2; }
+peer="$1"
+package="$(realpath -e -- "$2")"
+[[ "$(basename -- "$package")" == omarchy-sync-*.pkg.tar.zst ]] || { echo "invalid package" >&2; exit 2; }
+key="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync/ssh/id_ed25519"
+known_hosts="$HOME/.ssh/known_hosts"
+[[ -r "$key" ]] || { echo "missing paired OmarchySync key" >&2; exit 1; }
+ssh_options=(-i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+manifest="$work/manifest"
+signature="$manifest.sig"
+printf 'package=%s\nsha256=%s\ntimestamp=%s\nnonce=%s\n' \
+  "$(basename -- "$package")" "$(sha256sum -- "$package" | cut -d' ' -f1)" \
+  "$(date +%s)" "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" > "$manifest"
+ssh-keygen -Y sign -q -f "$key" -n omarchy-sync-upgrade "$manifest"
+remote="/var/tmp/omarchy-sync-upgrade"
+ssh "${ssh_options[@]}" "$peer" "mkdir -p '$remote' && chmod 700 '$remote'"
+scp "${ssh_options[@]}" "$package" "$manifest" "$signature" "$peer:$remote/"
+ssh "${ssh_options[@]}" "$peer" "sudo -n /usr/lib/omarchy-sync/omarchy-sync-upgrade-helper '$remote/$(basename -- "$package")' '$remote/manifest' '$remote/manifest.sig' && systemctl --user daemon-reload && systemctl --user restart omarchy-syncd.service"

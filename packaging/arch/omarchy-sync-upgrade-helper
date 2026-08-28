@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ $# -eq 3 ]] || { echo "usage: helper PACKAGE MANIFEST SIGNATURE" >&2; exit 2; }
+package="$(realpath -e -- "$1")"
+manifest="$(realpath -e -- "$2")"
+signature="$(realpath -e -- "$3")"
+for path in "$package" "$manifest" "$signature"; do
+  [[ "$path" == /var/tmp/omarchy-sync-upgrade/* ]] || { echo "invalid upgrade path" >&2; exit 2; }
+done
+[[ "$(basename -- "$package")" == omarchy-sync-*.pkg.tar.zst ]] || { echo "invalid package name" >&2; exit 2; }
+[[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]] || { echo "missing delegated user" >&2; exit 2; }
+user_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+authorized="$user_home/.ssh/authorized_keys"
+[[ -r "$authorized" ]] || { echo "no paired SSH identities" >&2; exit 1; }
+
+package_name="$(sed -n 's/^package=//p' "$manifest")"
+expected_hash="$(sed -n 's/^sha256=//p' "$manifest")"
+timestamp="$(sed -n 's/^timestamp=//p' "$manifest")"
+nonce="$(sed -n 's/^nonce=//p' "$manifest")"
+[[ "$package_name" == "$(basename -- "$package")" ]] || { echo "manifest package mismatch" >&2; exit 1; }
+[[ "$expected_hash" =~ ^[0-9a-f]{64}$ && "$timestamp" =~ ^[0-9]{10}$ && "$nonce" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid manifest" >&2; exit 1; }
+current="$(date +%s)"
+(( current >= timestamp && current - timestamp <= 300 )) || { echo "expired upgrade authorization" >&2; exit 1; }
+actual_hash="$(sha256sum -- "$package" | cut -d' ' -f1)"
+[[ "$actual_hash" == "$expected_hash" ]] || { echo "package digest mismatch" >&2; exit 1; }
+
+allowed="$(mktemp /run/omarchy-sync-upgrade-allowed.XXXXXX)"
+trap 'rm -f -- "$allowed"' EXIT
+awk '$NF ~ /^omarchy-sync:/ {print "omarchy-sync " $1 " " $2}' "$authorized" > "$allowed"
+[[ -s "$allowed" ]] || { echo "no paired signing keys" >&2; exit 1; }
+ssh-keygen -Y verify -f "$allowed" -I omarchy-sync -n omarchy-sync-upgrade -s "$signature" < "$manifest"
+
+/usr/bin/pacman -U --noconfirm -- "$package"
+rm -f -- "$package" "$manifest" "$signature"

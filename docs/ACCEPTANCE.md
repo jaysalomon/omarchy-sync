@@ -11,6 +11,8 @@ OmarchySync is accepted only when this flow works:
 7. The paired user can use the generated SSH profile without copying a key or
    entering an address; host-key verification remains enabled.
 7. The relationship survives logout, reboot, and temporary network loss.
+8. Installing a signed OmarchySync upgrade on either trusted machine propagates
+   it to paired peers without target-side commands or another authentication prompt.
 
 The following are product failures, not documented setup steps:
 
@@ -20,6 +22,7 @@ The following are product failures, not documented setup steps:
 - reporting that a peer is ready;
 - entering an IP address;
 - requiring a terminal after package installation;
+- requiring target-side approval for a signed upgrade from an already trusted peer;
 - silently granting trust without local authentication;
 - requiring Python, Cargo, or a source build at runtime.
 

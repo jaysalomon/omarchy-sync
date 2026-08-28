@@ -58,6 +58,17 @@ revoked independently:
 The future privileged layer, if one exists, must be separate from these user
 capabilities and require its own local authorization and revocation controls.
 
+## Delegated upgrades
+
+The fingerprint/password approval at pairing time establishes the machine trust
+relationship. A paired machine may subsequently propagate an OmarchySync Arch
+package without another target-side prompt. The sender signs a short-lived
+manifest with its dedicated paired Ed25519 key. The target's root-owned helper
+accepts only files in the upgrade staging directory, verifies the signer against
+the paired keys in `authorized_keys`, checks the manifest age and package digest,
+and can invoke only `pacman -U` for the named OmarchySync package. It exposes no
+general remote sudo or arbitrary command channel.
+
 ## Theme synchronization
 
 Theme continuity is the first data-layer capability. On pairing, the daemon

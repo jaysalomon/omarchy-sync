@@ -21,6 +21,7 @@ remove_firewall() {
 }
 
 post_install() {
+  visudo -cf /etc/sudoers.d/omarchy-sync
   configure_firewall
   ssh-keygen -A
   systemctl enable --now sshd.service
@@ -29,6 +30,7 @@ post_install() {
 }
 
 post_upgrade() {
+  visudo -cf /etc/sudoers.d/omarchy-sync
   configure_firewall
   ssh-keygen -A
   systemctl enable --now sshd.service
