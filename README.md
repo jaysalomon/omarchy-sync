@@ -2,25 +2,22 @@
 
 Seamless multi-machine continuity for Omarchy.
 
-The production implementation is now being built as the compiled Rust system
-daemon `omarchy-syncd`. See `docs/ACCEPTANCE.md` for the non-negotiable product
-flow and test gates. The scripts under `bin/` are retained as the original
-protocol experiment and are not part of the production tree.
+The production implementation is a compiled Rust system daemon,
+`omarchy-syncd`, distributed as an Arch package. Laptops run the installed
+binary and systemd unit; they do not need Cargo or a Git worktree at runtime.
+See `docs/ACCEPTANCE.md` for the non-negotiable product flow and test gates.
 
 ## Laptop test build
 
-For the immediate two-laptop test, update and run the compiled daemon:
+The runtime path is the Arch package, built from a GitHub release artifact:
 
 ```bash
-git pull
-./run-daemon.sh
+sudo pacman -U omarchy-sync-*.pkg.tar.zst
 ```
 
-No peer IP, pairing command, or key copy is required. Both daemons discover
-each other and one receiving machine uses its local polkit/PAM stack (including
-fingerprint auth when configured) before approving trust.
-
-`./install-system.sh` is retained for systemd installation after the live test.
+Pacman installs the compiled binary, system service, and polkit policy. The
+service starts automatically; no peer IP, pairing command, key copy, Cargo, or
+source checkout is required at runtime.
 
 This first prototype provides:
 
