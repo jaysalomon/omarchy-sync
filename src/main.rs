@@ -429,7 +429,7 @@ fn run_discovery(port: u16, device: Arc<Device>) -> Result<()> {
                     "peer discovered: device={peer_name} identity={peer_identity} address={source}"
                 );
             }
-            if device.identity < peer_identity && first_seen {
+            if device.identity < peer_identity && !is_trusted(&peer_identity) {
                 let peer = SocketAddr::new(source.ip(), tcp_port);
                 let local = Arc::clone(&device);
                 thread::spawn(move || {

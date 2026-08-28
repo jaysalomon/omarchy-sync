@@ -18,7 +18,8 @@ The runtime path is the Arch package, built from a GitHub release artifact:
 Pacman installs the compiled binary, user service, and polkit policy. The
 service starts automatically and configures LAN-scoped UFW access when UFW is
 active; no peer IP, pairing command, key copy, Cargo, or source checkout is
-required at runtime.
+required at runtime. An untrusted peer is retried automatically until the
+network path and local approval are available.
 
 This first prototype provides:
 
