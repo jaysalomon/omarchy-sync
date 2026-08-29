@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+lock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-sync-propagate.lock"
+exec 9>"$lock"
+flock -n 9 || exit 0
+
 state="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync"
 peers="$state/peers"
 upgrades="$state/upgrades"

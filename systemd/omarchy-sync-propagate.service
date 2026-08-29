@@ -5,3 +5,4 @@ After=network-online.target omarchy-syncd.service
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/omarchy-sync-propagate
+TimeoutStartSec=30

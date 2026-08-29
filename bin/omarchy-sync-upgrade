@@ -8,7 +8,7 @@ package="$(realpath -e -- "$2")"
 key="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync/ssh/id_ed25519"
 known_hosts="$HOME/.ssh/known_hosts"
 [[ -r "$key" ]] || { echo "missing paired OmarchySync key" >&2; exit 1; }
-ssh_options=(-i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
+ssh_options=(-i "$key" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 manifest="$work/manifest"
