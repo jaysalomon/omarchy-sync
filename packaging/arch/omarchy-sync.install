@@ -27,6 +27,7 @@ post_install() {
   systemctl enable --now sshd.service
   systemctl --global enable omarchy-syncd.service
   systemctl --global enable hyprpolkitagent.service
+  systemctl --global enable omarchy-sync-propagate.timer
 }
 
 post_upgrade() {
@@ -36,9 +37,11 @@ post_upgrade() {
   systemctl enable --now sshd.service
   systemctl --global enable omarchy-syncd.service
   systemctl --global enable hyprpolkitagent.service
+  systemctl --global enable omarchy-sync-propagate.timer
 }
 
 pre_remove() {
   remove_firewall
   systemctl --global disable omarchy-syncd.service
+  systemctl --global disable omarchy-sync-propagate.timer
 }

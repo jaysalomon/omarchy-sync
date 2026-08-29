@@ -22,16 +22,10 @@ systemctl --user daemon-reload
 systemctl --user enable --now hyprpolkitagent.service
 systemctl --user enable omarchy-syncd.service
 systemctl --user restart omarchy-syncd.service
-
-peers_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync/peers"
-if [[ -d "$peers_dir" ]]; then
-  while IFS= read -r peer_file; do
-    peer_address="$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$peer_file" | cut -d: -f1)"
-    if [[ -n "$peer_address" ]]; then
-      /usr/bin/omarchy-sync-upgrade "$peer_address" "$PACKAGE_FILE" || \
-        echo "Peer $peer_address still requires the one-time delegated-upgrade bootstrap." >&2
-    fi
-  done < <(find "$peers_dir" -maxdepth 1 -type f -name '*.json' -print)
-fi
+upgrade_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync/upgrades"
+mkdir -p "$upgrade_dir"
+cp "$PACKAGE_FILE" "$upgrade_dir/"
+systemctl --user enable --now omarchy-sync-propagate.timer
+/usr/bin/omarchy-sync-propagate || true
 
 echo "OmarchySync is installed and running. Discovery begins automatically."

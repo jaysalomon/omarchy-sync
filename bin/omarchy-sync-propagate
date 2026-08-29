@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+state="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync"
+peers="$state/peers"
+upgrades="$state/upgrades"
+completed="$upgrades/completed"
+[[ -d "$peers" && -d "$upgrades" ]] || exit 0
+mkdir -p "$completed"
+package="$(find "$upgrades" -maxdepth 1 -type f -name 'omarchy-sync-*.pkg.tar.zst' -print | sort -V | tail -1)"
+[[ -n "$package" ]] || exit 0
+while IFS= read -r peer_file; do
+  identity="$(basename -- "$peer_file" .json)"
+  address="$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$peer_file" | cut -d: -f1)"
+  marker="$completed/$identity-$(basename -- "$package")"
+  [[ -n "$address" && ! -e "$marker" ]] || continue
+  if /usr/bin/omarchy-sync-upgrade "$address" "$package"; then
+    touch "$marker"
+  fi
+done < <(find "$peers" -maxdepth 1 -type f -name '*.json' -print)

@@ -580,9 +580,18 @@ fn establish_ssh_trust(
     public_key: &str,
     host_key: &str,
 ) -> Result<()> {
-    let directory = ssh_dir();
-    fs::create_dir_all(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    establish_ssh_trust_in(&ssh_dir(), device, address, public_key, host_key)
+}
+
+fn establish_ssh_trust_in(
+    directory: &Path,
+    device: &str,
+    address: SocketAddr,
+    public_key: &str,
+    host_key: &str,
+) -> Result<()> {
+    fs::create_dir_all(directory)?;
+    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
     let safe_device: String = device
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
@@ -942,16 +951,14 @@ mod tests {
     fn ssh_trust_uses_plain_host_for_default_port() {
         let state = tempfile::tempdir().unwrap();
         let ssh = state.path().join("ssh");
-        unsafe {
-            env::set_var("OMARCHY_SYNCD_SSH_DIR", &ssh);
-        }
         fs::create_dir_all(&ssh).unwrap();
         fs::write(
             ssh.join("known_hosts"),
             "[192.168.0.157]:22 ssh-ed25519 OLD # omarchy-sync:laptop\n",
         )
         .unwrap();
-        establish_ssh_trust(
+        establish_ssh_trust_in(
+            &ssh,
             "laptop",
             "192.168.0.157:49321".parse().unwrap(),
             "ssh-ed25519 AAAAC3Nza peer",
