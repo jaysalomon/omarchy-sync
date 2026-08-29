@@ -91,3 +91,7 @@ online.
 
 No home directory, system disk, or arbitrary path is exported. Broader shares,
 write policy, and revocation controls require their own capability design.
+
+All OmarchySync-managed SSH and SSHFS connections use an isolated client
+configuration together with their pinned key and known-hosts state. Local user
+or system SSH configuration cannot alter the trusted transport path.

@@ -21,6 +21,7 @@ const MAX_FRAME: usize = 4096;
 const TTL_SECONDS: u64 = 90;
 const THEME_POLL_INTERVAL: Duration = Duration::from_secs(3);
 const MOUNT_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const MANAGED_SSH_CONFIG: &str = "/dev/null";
 
 #[derive(Debug, Clone)]
 struct Device {
@@ -372,7 +373,7 @@ fn sync_theme(peer: &TrustedPeer, theme: &str) -> Result<()> {
     }
     let known_hosts = ssh_dir().join("known_hosts");
     let status = Command::new("/usr/bin/ssh")
-        .args(["-i"])
+        .args(["-F", MANAGED_SSH_CONFIG, "-i"])
         .arg(state_dir().join("ssh/id_ed25519"))
         .args([
             "-p",
@@ -398,7 +399,7 @@ fn sync_theme(peer: &TrustedPeer, theme: &str) -> Result<()> {
 
 fn ssh_options(command: &mut Command, peer: &TrustedPeer) {
     command
-        .args(["-i"])
+        .args(["-F", MANAGED_SSH_CONFIG, "-i"])
         .arg(state_dir().join("ssh/id_ed25519"))
         .args([
             "-p",
@@ -443,7 +444,7 @@ fn mount_peer_share(peer: &TrustedPeer) -> Result<()> {
         return Ok(());
     }
     let options = format!(
-        "IdentityFile={},UserKnownHostsFile={},StrictHostKeyChecking=yes,BatchMode=yes,port=22,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3",
+        "IdentityFile={},UserKnownHostsFile={},StrictHostKeyChecking=yes,BatchMode=yes,port=22,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,ssh_command=/usr/bin/ssh -F /dev/null",
         state_dir().join("ssh/id_ed25519").display(),
         ssh_dir().join("known_hosts").display(),
     );
@@ -987,6 +988,10 @@ mod tests {
             address: SocketAddr::from(([192, 168, 0, 215], 49_321)),
         };
         assert!(peer_mountpoint(&peer).ends_with("machines/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    }
+    #[test]
+    fn managed_ssh_ignores_system_client_configuration() {
+        assert_eq!(MANAGED_SSH_CONFIG, "/dev/null");
     }
     #[test]
     fn tcp_handler_records_trust_and_rejects_replay() {
