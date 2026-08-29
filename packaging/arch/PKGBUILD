@@ -1,5 +1,5 @@
 pkgname=omarchy-sync
-pkgver=0.3.4
+pkgver=0.3.5
 pkgrel=1
 pkgdesc='Trusted multi-machine continuity service for Omarchy'
 arch=('x86_64')

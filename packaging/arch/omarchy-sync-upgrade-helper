@@ -31,5 +31,14 @@ awk '$NF ~ /^omarchy-sync:/ {print "omarchy-sync " $1 " " $2}' "$authorized" > "
 [[ -s "$allowed" ]] || { echo "no paired signing keys" >&2; exit 1; }
 ssh-keygen -Y verify -f "$allowed" -I omarchy-sync -n omarchy-sync-upgrade -s "$signature" < "$manifest"
 
+read -r incoming_name incoming_version < <(/usr/bin/pacman -Qp -- "$package")
+[[ "$incoming_name" == omarchy-sync && -n "$incoming_version" ]] || { echo "invalid package identity" >&2; exit 1; }
+installed_version="$(/usr/bin/pacman -Q omarchy-sync 2>/dev/null | awk '{print $2}')"
+if [[ -n "$installed_version" ]] && (( $(/usr/bin/vercmp "$incoming_version" "$installed_version") <= 0 )); then
+  echo "omarchy-sync $installed_version is already current or newer; refusing $incoming_version"
+  rm -f -- "$package" "$manifest" "$signature"
+  exit 0
+fi
+
 /usr/bin/pacman -U --noconfirm -- "$package"
 rm -f -- "$package" "$manifest" "$signature"
