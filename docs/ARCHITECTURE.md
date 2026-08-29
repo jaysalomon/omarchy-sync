@@ -95,7 +95,7 @@ write policy, and revocation controls require their own capability design.
 ## Data synchronization
 
 Trusted machines automatically replicate `~/OmarchySync/share` over the pinned
-SSH transport. The lexically lower machine identity coordinates each pair so
+SSH transport. The lexically higher machine identity coordinates each pair so
 both ends cannot race the same files. Each pass pulls before it pushes, compares
 file content, and transfers only new or changed files. Deletions are not
 propagated. When a newer file replaces an existing copy, rsync preserves the

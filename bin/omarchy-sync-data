@@ -21,12 +21,13 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
 while IFS= read -r peer_file; do
   identity="$(basename -- "$peer_file" .json)"
-  [[ "$local_identity" < "$identity" ]] || continue
+  [[ "$local_identity" > "$identity" ]] || continue
   address="$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$peer_file" | cut -d: -f1)"
   [[ -n "$address" ]] || continue
 
   ssh_transport="ssh -F /dev/null -i $key -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
   ssh -F /dev/null -i "$key" -o BatchMode=yes -o ConnectTimeout=5 \
+    -o ServerAliveInterval=5 -o ServerAliveCountMax=1 \
     -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts" \
     "$address" 'mkdir -p OmarchySync/share OmarchySync/conflicts'
 
