@@ -92,6 +92,32 @@ online.
 No home directory, system disk, or arbitrary path is exported. Broader shares,
 write policy, and revocation controls require their own capability design.
 
+## Data synchronization
+
+Trusted machines automatically replicate `~/OmarchySync/share` over the pinned
+SSH transport. The lexically lower machine identity coordinates each pair so
+both ends cannot race the same files. Each pass pulls before it pushes, compares
+file content, and transfers only new or changed files. Deletions are not
+propagated. When a newer file replaces an existing copy, rsync preserves the
+displaced version under `~/OmarchySync/conflicts/<peer-id>/`.
+
+This first data layer deliberately excludes the rest of the home directory,
+credentials, caches, hardware-specific configuration, and system paths.
+
+## Device map and agent contract
+
+Every daemon start writes a stable DeviceID and current hardware profile to
+`~/.local/state/omarchy-sync/device.json`. A share-safe copy is published under
+`~/OmarchySync/share/.omarchy-sync/devices/<device-id>.json`, so trusted peers
+and on-device agents can inspect device name, product, CPU, memory, GPUs,
+battery/fingerprint presence, and supported OmarchySync capabilities without
+receiving raw machine IDs, host keys, or credentials.
+
+`~/OmarchySync/share/AGENTS.md` is generated on-device. It tells agents to read
+the device map before selecting a machine, use the shared directory for portable
+work, keep secrets and hardware-local settings out, preserve conflicts, and use
+only explicitly installed trusted capabilities.
+
 All OmarchySync-managed SSH and SSHFS connections use an isolated client
 configuration together with their pinned key and known-hosts state. Local user
 or system SSH configuration cannot alter the trusted transport path.

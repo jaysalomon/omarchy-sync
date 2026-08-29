@@ -28,6 +28,7 @@ post_install() {
   systemctl --global enable omarchy-syncd.service
   systemctl --global enable hyprpolkitagent.service
   systemctl --global enable omarchy-sync-propagate.timer
+  systemctl --global enable omarchy-sync-data.timer
 }
 
 post_upgrade() {
@@ -38,10 +39,12 @@ post_upgrade() {
   systemctl --global enable omarchy-syncd.service
   systemctl --global enable hyprpolkitagent.service
   systemctl --global enable omarchy-sync-propagate.timer
+  systemctl --global enable omarchy-sync-data.timer
 }
 
 pre_remove() {
   remove_firewall
   systemctl --global disable omarchy-syncd.service
   systemctl --global disable omarchy-sync-propagate.timer
+  systemctl --global disable omarchy-sync-data.timer
 }

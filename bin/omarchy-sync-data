@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+state="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-sync"
+peers="$state/peers"
+share="$HOME/OmarchySync/share"
+conflicts="$HOME/OmarchySync/conflicts"
+key="$state/ssh/id_ed25519"
+known_hosts="$HOME/.ssh/known_hosts"
+lock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-sync-data.lock"
+
+exec 9>"$lock"
+flock -n 9 || exit 0
+[[ -d "$peers" && -r "$key" && -r "$known_hosts" ]] || exit 0
+mkdir -p "$share" "$conflicts"
+
+machine_id="$(tr -d '\n' < /etc/machine-id)"
+host_key="$(tr -d '\n' < /etc/ssh/ssh_host_ed25519_key.pub)"
+local_identity="$(printf '%s:%s' "$machine_id" "$host_key" | sha256sum | cut -c1-32)"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+while IFS= read -r peer_file; do
+  identity="$(basename -- "$peer_file" .json)"
+  [[ "$local_identity" < "$identity" ]] || continue
+  address="$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$peer_file" | cut -d: -f1)"
+  [[ -n "$address" ]] || continue
+
+  ssh_transport="ssh -F /dev/null -i $key -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
+  ssh -F /dev/null -i "$key" -o BatchMode=yes -o ConnectTimeout=5 \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts" \
+    "$address" 'mkdir -p OmarchySync/share OmarchySync/conflicts'
+
+  rsync --archive --checksum --update --partial --backup \
+    --backup-dir="$conflicts/$identity/pull-$stamp" \
+    --exclude='/.omarchy-sync-conflicts/' \
+    -e "$ssh_transport" "$address:OmarchySync/share/" "$share/"
+
+  rsync --archive --checksum --update --partial --backup \
+    --backup-dir="../conflicts/$local_identity/push-$stamp" \
+    --exclude='/.omarchy-sync-conflicts/' \
+    -e "$ssh_transport" "$share/" "$address:OmarchySync/share/"
+done < <(find "$peers" -maxdepth 1 -type f -name '*.json' -print | sort)

@@ -1,11 +1,11 @@
 pkgname=omarchy-sync
-pkgver=0.3.5
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Trusted multi-machine continuity service for Omarchy'
 arch=('x86_64')
 url='https://github.com/jaysalomon/omarchy-sync'
 license=('MIT')
-depends=('systemd' 'polkit' 'hyprpolkitagent' 'openssh' 'sshfs' 'sudo' 'util-linux')
+depends=('systemd' 'polkit' 'hyprpolkitagent' 'openssh' 'sshfs' 'rsync' 'pciutils' 'sudo' 'util-linux')
 makedepends=('cargo')
 install="$pkgname.install"
 source=()
@@ -26,10 +26,13 @@ package() {
   install -Dm755 packaging/arch/omarchy-sync-upgrade-helper "$pkgdir/usr/lib/omarchy-sync/omarchy-sync-upgrade-helper"
   install -Dm755 bin/omarchy-sync-upgrade "$pkgdir/usr/bin/omarchy-sync-upgrade"
   install -Dm755 bin/omarchy-sync-propagate "$pkgdir/usr/bin/omarchy-sync-propagate"
+  install -Dm755 bin/omarchy-sync-data "$pkgdir/usr/bin/omarchy-sync-data"
   install -dm750 "$pkgdir/etc/sudoers.d"
   install -Dm440 packaging/arch/omarchy-sync.sudoers "$pkgdir/etc/sudoers.d/omarchy-sync"
   install -Dm644 systemd/omarchy-sync-propagate.service "$pkgdir/usr/lib/systemd/user/omarchy-sync-propagate.service"
   install -Dm644 systemd/omarchy-sync-propagate.timer "$pkgdir/usr/lib/systemd/user/omarchy-sync-propagate.timer"
+  install -Dm644 systemd/omarchy-sync-data.service "$pkgdir/usr/lib/systemd/user/omarchy-sync-data.service"
+  install -Dm644 systemd/omarchy-sync-data.timer "$pkgdir/usr/lib/systemd/user/omarchy-sync-data.timer"
   install -Dm644 systemd/omarchy-syncd.service "$pkgdir/usr/lib/systemd/user/omarchy-syncd.service"
   install -Dm644 packaging/arch/org.omarchy.sync.policy "$pkgdir/usr/share/polkit-1/actions/org.omarchy.sync.policy"
   install -Dm644 packaging/arch/sshd_config.conf "$pkgdir/etc/ssh/sshd_config.d/90-omarchy-sync.conf"

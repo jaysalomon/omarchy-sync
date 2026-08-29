@@ -1,0 +1,8 @@
+[Unit]
+Description=Synchronize protected OmarchySync data with trusted peers
+After=network-online.target omarchy-syncd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-sync-data
+TimeoutStartSec=2min

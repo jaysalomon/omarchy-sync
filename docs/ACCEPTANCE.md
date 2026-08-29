@@ -42,5 +42,13 @@ The following are product failures, not documented setup steps:
   the daemon journal.
 - A trusted peer's `~/OmarchySync/share` is mounted locally under
   `~/OmarchySync/machines/<peer-id>`; no other home or system path is exposed.
+- Creating or changing a file in `~/OmarchySync/share` on either online trusted
+  machine automatically reproduces its content on the other machine.
+- Deletions are not propagated, and replaced file versions are retained under
+  `~/OmarchySync/conflicts` rather than silently discarded.
+- Each machine persists a stable DeviceID and hardware/capability profile, and
+  both profiles become visible in the synchronized device registry.
+- The synchronized `AGENTS.md` instructs on-device agents how to select and use
+  either machine without treating trust as unrestricted access.
 - SSH, synchronization, mounts, and privileged work are separately tested when
   those layers are implemented.

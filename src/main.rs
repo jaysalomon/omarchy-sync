@@ -32,6 +32,20 @@ struct Device {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct HardwareProfile {
+    device_id: String,
+    device_name: String,
+    product: Option<String>,
+    cpu: Option<String>,
+    memory_bytes: Option<u64>,
+    gpus: Vec<String>,
+    battery: bool,
+    fingerprint: bool,
+    capabilities: Vec<String>,
+    updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TrustedPeer {
     identity: String,
     #[serde(default)]
@@ -165,6 +179,90 @@ fn load_device() -> Result<Device> {
         public_key,
         host_key,
     })
+}
+
+fn first_prefixed_line(path: &str, prefix: &str) -> Option<String> {
+    fs::read_to_string(path).ok()?.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        (name.trim() == prefix).then(|| value.trim().to_string())
+    })
+}
+
+fn memory_bytes() -> Option<u64> {
+    first_prefixed_line("/proc/meminfo", "MemTotal")?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()
+        .map(|kilobytes| kilobytes * 1024)
+}
+
+fn has_battery() -> bool {
+    fs::read_dir("/sys/class/power_supply")
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().starts_with("BAT"))
+}
+
+fn gpu_names() -> Vec<String> {
+    let Ok(output) = Command::new("/usr/bin/lspci").arg("-mm").output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| {
+            line.contains("VGA compatible controller")
+                || line.contains("3D controller")
+                || line.contains("Display controller")
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn hardware_profile(device: &Device) -> HardwareProfile {
+    HardwareProfile {
+        device_id: device.identity.clone(),
+        device_name: device.name.clone(),
+        product: read_trimmed("/sys/class/dmi/id/product_name"),
+        cpu: first_prefixed_line("/proc/cpuinfo", "model name"),
+        memory_bytes: memory_bytes(),
+        gpus: gpu_names(),
+        battery: has_battery(),
+        fingerprint: Path::new("/usr/bin/fprintd-list").exists(),
+        capabilities: vec![
+            "ssh".into(),
+            "sync.data".into(),
+            "sync.theme".into(),
+            "mount.share".into(),
+            "upgrade.delegated".into(),
+        ],
+        updated_at: now(),
+    }
+}
+
+fn agent_instructions() -> &'static str {
+    "# OmarchySync agent instructions\n\n\
+This directory is the trusted multi-machine workspace.\n\n\
+- Read `.omarchy-sync/devices/*.json` before choosing a machine. `device_id` is the stable identity; hardware and `capabilities` describe what that machine can do.\n\
+- Files under this `share` directory replicate automatically between trusted machines. Work here when the result must be available on both devices.\n\
+- Never place passwords, private keys, browser profiles, tokens, or machine-specific hardware configuration in the shared directory.\n\
+- Prefer the local machine for ordinary work. Use a trusted peer only when its recorded hardware or capability materially fits the task better.\n\
+- Treat `conflicts/` as preserved history. Never delete conflict copies automatically; surface them for human review.\n\
+- Trust does not imply unrestricted root access. Use only the installed OmarchySync capabilities and the paired SSH identity.\n"
+}
+
+fn persist_device_map(device: &Device) -> Result<()> {
+    let profile = hardware_profile(device);
+    let bytes = serde_json::to_vec_pretty(&profile)?;
+    fs::create_dir_all(state_dir())?;
+    fs::write(state_dir().join("device.json"), &bytes)?;
+    let registry = shared_root().join(".omarchy-sync/devices");
+    fs::create_dir_all(&registry)?;
+    fs::write(registry.join(format!("{}.json", device.identity)), bytes)?;
+    fs::write(shared_root().join("AGENTS.md"), agent_instructions())?;
+    Ok(())
 }
 
 fn nonce() -> Result<String> {
@@ -888,6 +986,7 @@ fn main() -> Result<()> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let device = Arc::new(load_device()?);
+    persist_device_map(&device)?;
     eprintln!(
         "omarchy-syncd starting: device={} identity={}",
         device.name, device.identity
@@ -992,6 +1091,14 @@ mod tests {
     #[test]
     fn managed_ssh_ignores_system_client_configuration() {
         assert_eq!(MANAGED_SSH_CONFIG, "/dev/null");
+    }
+    #[test]
+    fn agent_contract_routes_shared_work_without_secrets() {
+        let instructions = agent_instructions();
+        assert!(instructions.contains("devices/*.json"));
+        assert!(instructions.contains("replicate automatically"));
+        assert!(instructions.contains("Never place passwords"));
+        assert!(instructions.contains("conflicts/"));
     }
     #[test]
     fn tcp_handler_records_trust_and_rejects_replay() {
