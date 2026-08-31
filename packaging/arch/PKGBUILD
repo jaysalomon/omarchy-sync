@@ -1,5 +1,5 @@
 pkgname=omarchy-sync
-pkgver=0.4.1
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='Trusted multi-machine continuity service for Omarchy'
 arch=('x86_64')
@@ -38,4 +38,5 @@ package() {
   install -Dm644 packaging/arch/sshd_config.conf "$pkgdir/etc/ssh/sshd_config.d/90-omarchy-sync.conf"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 docs/ACCEPTANCE.md "$pkgdir/usr/share/doc/$pkgname/ACCEPTANCE.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

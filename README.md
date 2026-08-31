@@ -128,6 +128,10 @@ mise exec rust@stable -- cargo build --release
 Runtime use is package-based. A release machine does not need Cargo, source
 code, or a Git checkout.
 
+## Licence
+
+OmarchySync is available under the [MIT Licence](LICENSE).
+
 ---
 
 <p align="center"><strong>Your Omarchy. Wherever you sit down.</strong></p>
