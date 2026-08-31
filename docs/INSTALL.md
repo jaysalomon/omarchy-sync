@@ -27,20 +27,29 @@ Its user service is installed at:
 ## Normal operation
 
 No command is needed after installation. At login the user service starts,
-discovers local peers, and requests local desktop authorization when pairing is
-needed. Approval creates `identity` and `ssh` scopes only. It does not grant
-remote sudo, mounts, synchronization, or compute access.
+discovers certified local peers, and shows one actionable “Sync with <device>?”
+notification when pairing is needed. The local OS then handles password or
+fingerprint authorization. Both machines persist the same signed bilateral
+pairing record. Pairing itself grants no SSH, mounts, synchronization, compute,
+upgrade, or privileged access.
 
-After a successful pairing, normal SSH tools can use the peer by machine name:
+Enrollment is an external Omarchy deployment step. Packaging does not contain
+an issuer secret or fabricate certificates. A root-owned public root must be
+installed at `/usr/share/omarchy-sync/omarchy-root.ed25519`, and this device's
+certificate must be provisioned at:
 
-```bash
-ssh omarchy-<machine-name>
+```text
+~/.local/state/omarchy-sync/identity/device-cert.bin
 ```
 
-OmarchySync generates the dedicated per-user key, authorizes it on the trusted
-peer, pins that peer's host key, and maintains the profile at
-`~/.ssh/omarchy-sync.d/`. It never asks you to copy a key or enter an address.
-The package enables `sshd` with password login and root login disabled.
+Without both files, the daemon logs `enrollment required` and does not
+advertise or accept pairing.
+
+Pairing does not configure SSH, create keys, write `authorized_keys` or
+`known_hosts`, mount directories, synchronize files, or authorize upgrades.
+Those are separate capability layers and must not be inferred from a bilateral
+pairing record. A future capability implementation will document its own
+installation and local authorization steps.
 
 Useful diagnostics, not setup requirements:
 
@@ -52,8 +61,8 @@ journalctl --user -u omarchy-syncd.service --follow
 ## Firewall behavior
 
 If UFW is active, package install/upgrade adds LAN-scoped TCP and UDP rules for
-port `49321` and a LAN-scoped TCP rule for SSH on port `22`. The package does
-not expose either service to the internet.
+port `49321`. Pairing does not require or open an SSH rule, and the package does
+not expose the discovery or pairing service to the internet.
 
 ## Upgrade
 

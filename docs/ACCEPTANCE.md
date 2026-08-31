@@ -7,12 +7,12 @@ OmarchySync is accepted only when this flow works:
 3. The machines discover one another without hostnames, IP addresses, or commands.
 4. Exactly one local trust prompt appears.
 5. A password or fingerprint approves the relationship through the local OS.
-6. `identity` and `ssh` trusted peer records are persisted on both machines.
-7. The paired user can use the generated SSH profile without copying a key or
-   entering an address; host-key verification remains enabled.
-7. The relationship survives logout, reboot, and temporary network loss.
-8. Installing a signed OmarchySync upgrade on either trusted machine propagates
-   it to paired peers without target-side commands or another authentication prompt.
+6. Both machines persist identical fully signed active pairing records.
+7. No SSH, capability, mount, sync, compute, upgrade, or privileged files are
+   created by pairing.
+8. The relationship survives logout, reboot, and temporary network loss.
+9. Any future delegated-upgrade capability is accepted separately; pairing
+   alone does not authorize upgrades.
 
 The following are product failures, not documented setup steps:
 
@@ -22,33 +22,33 @@ The following are product failures, not documented setup steps:
 - reporting that a peer is ready;
 - entering an IP address;
 - requiring a terminal after package installation;
-- requiring target-side approval for a signed upgrade from an already trusted peer;
+- assuming pairing authorizes delegated upgrades;
 - silently granting trust without local authentication;
 - requiring Python, Cargo, or a source build at runtime.
 
 ## Test gates
 
-- Unit tests reject malformed, oversized, stale, and replayed packets.
-- Integration tests run two isolated peers and complete discovery automatically.
-- Firewall installation is LAN-scoped.
-- Pairing creates no trust state unless the authorization broker approves it.
-- Pairing invokes the named `org.omarchy.sync.pair` polkit action rather than a
-  generic root authorization.
-- SSH accepts only the approved managed key for the paired user; password and
-  root SSH login are disabled by the package configuration.
-- Changing to an already-installed Omarchy theme on one trusted machine applies
-  that same theme on its trusted peer without copying arbitrary configuration.
-- A missing or unsafe theme name does not modify the peer and is reported in
-  the daemon journal.
-- A trusted peer's `~/OmarchySync/share` is mounted locally under
-  `~/OmarchySync/machines/<peer-id>`; no other home or system path is exposed.
-- Creating or changing a file in `~/OmarchySync/share` on either online trusted
-  machine automatically reproduces its content on the other machine.
-- Deletions are not propagated, and replaced file versions are retained under
-  `~/OmarchySync/conflicts` rather than silently discarded.
-- Each machine persists a stable DeviceID and hardware/capability profile, and
-  both profiles become visible in the synchronized device registry.
-- The synchronized `AGENTS.md` instructs on-device agents how to select and use
-  either machine without treating trust as unrestricted access.
-- SSH, synchronization, mounts, and privileged work are separately tested when
-  those layers are implemented.
+- Protocol-v3 unit tests reject malformed, oversized, stale, replayed, altered,
+  and MITM records.
+- `runtime_pairing_is_discovery_bound_and_bilateral` proves one authorization,
+  identical active records, and no SSH/capability files.
+- `listener_routes_ephemeral_client_by_signed_device_preface` exercises the
+  real listener with a client source port different from the discovery port.
+- `runtime_recovers_when_connection_dies_after_prepared`,
+  `runtime_recovers_when_connection_dies_after_initiator_cosign`, and
+  `runtime_recovers_when_finalized_ack_is_lost` prove retry convergence without
+  a second authorization.
+- `runtime_denial_creates_no_trust_and_no_prompt_retry`,
+  `runtime_wrong_discovered_device_id_fails_before_trust`, and
+  `missing_enrollment_is_fail_closed` prove the fail-closed paths.
+- `runtime_global_concurrency_limits_two_distinct_pair_attempts` proves the
+  runtime's one-prompt global single-flight gate across different peers.
+
+The runtime tests use two isolated loopback peers, a test issuer, and a mock
+authorization broker. Production acceptance additionally requires an external
+issuer to provision the root and device certificates documented in
+`docs/INSTALL.md`; those credentials are not bundled or fabricated here.
+
+SSH, mounts, synchronization, compute, upgrades, and privileged work are
+separate capability layers. They are not pairing acceptance criteria and must
+not be inferred from an active pairing record.

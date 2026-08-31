@@ -16,27 +16,26 @@ LAN-scoped UFW configuration. Git and Cargo are not part of runtime operation.
 ```text
 login
   → systemd user service starts
-  → UDP DISCOVER broadcast on 49321
-  → peer detected
-  → deterministic initiator opens TCP 49321
-  → PAIR_HELLO
-  → receiver requests local polkit/PAM approval
-  → PAIR_ACCEPT or PAIR_REJECT
-  → `identity` and `ssh` trust are persisted locally on both machines
+  → signed protocol-v3 UDP discovery broadcast on 49321
+  → certified peer detected
+  → deterministic initiator opens bounded, authenticated TCP 49321
+  → receiver shows “Sync with <device>?”
+  → local `pkcheck --action-id org.omarchy.sync.pair --process <daemon-pid> --allow-user-interaction`
+  → encrypted prepare/co-sign/finalize exchange
+  → identical bilateral pairing records are persisted
 ```
 
-Packets are bounded JSON frames with a magic value, protocol version,
-timestamp, device identity, and a one-time nonce for pair requests. The daemon
-rejects malformed, oversized, or stale packets.
+Discovery is a signed protocol-v3 certificate announcement with a bounded
+replay cache. TCP uses bounded length framing around the Noise state machine;
+the daemon rejects malformed, oversized, stale, replayed, or unauthenticated
+messages. Missing enrollment fails closed: no discovery or pairing is exposed.
 
 ## Trust boundary
 
-Fingerprint data and passwords never leave the local machine. The current
-release grants `identity` and `ssh` scopes. The `ssh` scope creates a dedicated
-per-user Ed25519 key, authorizes that key only after local approval, pins the
-peer host key, and maintains a managed SSH profile. The package configures
-sshd for key-only, non-root access. It does not grant sudo, filesystem mounts,
-synchronization, or compute privileges.
+Fingerprint data and passwords never leave the local machine. Pairing grants
+identity trust only. It creates no SSH keys, authorized_keys, known_hosts
+entries, mounts, sync, compute, upgrade, or privileged access. Those
+capabilities are separate records and require their own authorization.
 
 ## Capability roadmap
 
@@ -58,66 +57,11 @@ revoked independently:
 The future privileged layer, if one exists, must be separate from these user
 capabilities and require its own local authorization and revocation controls.
 
-## Delegated upgrades
+## Capability layers (not enabled by pairing)
 
-The fingerprint/password approval at pairing time establishes the machine trust
-relationship. A paired machine may subsequently propagate an OmarchySync Arch
-package without another target-side prompt. The sender signs a short-lived
-manifest with its dedicated paired Ed25519 key. The target's root-owned helper
-accepts only files in the upgrade staging directory, verifies the signer against
-the paired keys in `authorized_keys`, checks the manifest age and package digest,
-and can invoke only `pacman -U` for the named OmarchySync package. It exposes no
-general remote sudo or arbitrary command channel.
-
-## Theme synchronization
-
-Theme continuity is the first data-layer capability. On pairing, the daemon
-persists the trusted peer's last discovered LAN endpoint. It watches
-`~/.local/state/omarchy/current/theme.name`; when that value changes to a safe
-theme slug, it connects through the paired Ed25519 SSH identity and runs
-Omarchy's headless theme apply command on each trusted peer.
-
-The remote Omarchy command remains the policy authority: it only applies a
-theme that exists there. This release intentionally synchronizes selection, not
-custom theme directories, backgrounds, or general desktop configuration.
-
-## Network drives
-
-The first mount capability is deliberately narrow. Every trusted machine owns
-`~/OmarchySync/share`, and the daemon mounts that peer-owned folder at
-`~/OmarchySync/machines/<peer-id>` using SSHFS, the paired Ed25519 identity,
-and pinned host-key verification. The mount is retried while the peer is
-online.
-
-No home directory, system disk, or arbitrary path is exported. Broader shares,
-write policy, and revocation controls require their own capability design.
-
-## Data synchronization
-
-Trusted machines automatically replicate `~/OmarchySync/share` over the pinned
-SSH transport. The lexically higher machine identity coordinates each pair so
-both ends cannot race the same files. Each pass pulls before it pushes, compares
-file content, and transfers only new or changed files. Deletions are not
-propagated. When a newer file replaces an existing copy, rsync preserves the
-displaced version under `~/OmarchySync/conflicts/<peer-id>/`.
-
-This first data layer deliberately excludes the rest of the home directory,
-credentials, caches, hardware-specific configuration, and system paths.
-
-## Device map and agent contract
-
-Every daemon start writes a stable DeviceID and current hardware profile to
-`~/.local/state/omarchy-sync/device.json`. A share-safe copy is published under
-`~/OmarchySync/share/.omarchy-sync/devices/<device-id>.json`, so trusted peers
-and on-device agents can inspect device name, product, CPU, memory, GPUs,
-battery/fingerprint presence, and supported OmarchySync capabilities without
-receiving raw machine IDs, host keys, or credentials.
-
-`~/OmarchySync/share/AGENTS.md` is generated on-device. It tells agents to read
-the device map before selecting a machine, use the shared directory for portable
-work, keep secrets and hardware-local settings out, preserve conflicts, and use
-only explicitly installed trusted capabilities.
-
-All OmarchySync-managed SSH and SSHFS connections use an isolated client
-configuration together with their pinned key and known-hosts state. Local user
-or system SSH configuration cannot alter the trusted transport path.
+SSH, upgrades, themes, mounts, data synchronization, compute, and device
+profiles are separate product layers. They are not implemented by this pairing
+runtime and must each define their own capability record, transport, local
+authorization, audit trail, and revocation. In particular, an active pairing
+record is not an SSH authorization, a mount permission, a synchronization
+instruction, or remote privilege.
