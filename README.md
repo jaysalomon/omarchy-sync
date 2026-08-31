@@ -1,105 +1,133 @@
-# OmarchySync
+![A desktop, laptop and second desktop sharing one continuous Omarchy workspace](docs/assets/omarchy-sync-hero.webp)
 
-Seamless multi-machine continuity for Omarchy.
+<p align="center">
+  <img src="docs/assets/omarchy-sync-mark-small.png" width="112" alt="OmarchySync logo">
+</p>
 
-The production implementation is a compiled Rust system daemon,
-`omarchy-syncd`, distributed as an Arch package. Laptops run the installed
-binary and systemd unit; they do not need Cargo or a Git worktree at runtime.
-See `docs/ACCEPTANCE.md` for the non-negotiable product flow and test gates.
+<h1 align="center">OmarchySync</h1>
 
-## Laptop test build
+<p align="center"><strong>Approve the machines you know. The rest unlocks.</strong></p>
 
-The runtime path is the Arch package, built from a GitHub release artifact:
+<p align="center">
+  <img src="https://img.shields.io/badge/built_for-Omarchy-92D050?style=flat-square" alt="Built for Omarchy">
+  <img src="https://img.shields.io/badge/runtime-Rust-59CBE8?style=flat-square" alt="Rust runtime">
+  <img src="https://img.shields.io/badge/status-private_prototype-E9548D?style=flat-square" alt="Private prototype">
+</p>
 
-```bash
-./install.sh
+## It just works
+
+Install OmarchySync on your Omarchy computers. They appear automatically.
+Approve the machines you recognise as yours. That is the setup.
+
+From then on, the rest unlocks: shared work, portable preferences, access to the
+right machine, and the ability to use the strongest computer available without
+rebuilding your workflow there. Sit down anywhere and continue.
+
+OmarchySync is the OS-level continuity layer joining the desktop at your desk,
+the powerful machine in another room, and the laptop you carry. There are no
+addresses to enter, keys to move, ports to open, or pairing commands to run.
+
+## What it should feel like
+
+```text
+DESKTOP  ━━━━━━━━━  LAPTOP  ━━━━━━━━━  WORKSTATION
+            one Omarchy workspace
 ```
 
-Pacman installs the compiled binary, user service, Polkit policy, SSH service,
-and Omarchy authentication agent. The
-service starts automatically and configures LAN-scoped UFW access when UFW is
-active; no peer IP, pairing command, key copy, Cargo, or source checkout is
-required at runtime. An untrusted peer is retried automatically until the
-network path and local approval are available.
+- See your known Omarchy machines appear and approve them.
+- Start on the desktop. Pick up the laptop. Keep going.
+- Use the strongest available machine without rebuilding the job there.
+- Reach shared files without copying whole home directories around.
+- Keep portable themes and working preferences in step.
+- Let every machine retain its own hardware-specific setup.
+- Approve once per machine; let the system handle the rest.
 
-This first prototype provides:
+No cloud account sits in the middle. The machines work together directly.
 
-- a user-level service that runs at login;
-- machine capability discovery;
-- a safe shared-state layout with common and machine-local areas;
-- SSH host profiles for trusted machines;
-- an optional sync backend hook (Syncthing is the intended backend);
-- explicit boundaries for secrets, caches, hardware state, and privileged actions.
+## The working foundation
 
-The service is deliberately non-destructive until the second machine is paired.
-It will not overwrite existing Omarchy configuration automatically.
+The current private prototype has the OS-level foundation running:
 
-## Theme continuity
+- a compiled Rust daemon packaged for Omarchy/Arch;
+- automatic discovery of nearby OmarchySync machines;
+- one visible approval through the local desktop session;
+- a persistent relationship between approved machines;
+- recovery across reconnects, restarts, and interrupted setup;
+- strict separation between portable user state and machine-local state;
+- 41 passing tests covering the pairing and recovery foundation.
 
-After two machines are paired, a deliberate Omarchy theme change on either
-machine is applied to its trusted peers automatically. OmarchySync watches the
-active theme name and invokes Omarchy's own theme command remotely over the
-paired key-only SSH channel; it does not copy arbitrary desktop configuration.
+The continuity layers—shared work, selected Omarchy settings, machine mounts,
+and compute handoff—sit on top of that foundation and can be introduced without
+turning one approval into unrestricted machine access.
 
-The first layer synchronizes theme **selection** for themes already installed
-on both machines. A missing custom theme is rejected safely by Omarchy and is
-logged; custom theme assets and backgrounds will be the next extension. Monitor
-layouts, input settings, private keys, browser data, and other machine-local
-state remain local.
+## The shared core: secure Omarchy communications
 
-## Network drives
+There are already different ways people can approach shared files, remote jobs,
+themes, and multi-machine workflows. Those layers are personal: people will
+choose different tools, aesthetics, and preferences.
 
-Each trusted machine exposes one purpose-built folder,
-`~/OmarchySync/share`. OmarchySync creates it automatically and mounts the
-peer's folder locally at `~/OmarchySync/machines/<peer-id>`. This is a live
-network drive over the paired, pinned SSH identity—not a second full-home copy.
+The common piece should be an Omarchy-specific secure communications protocol
+and trust foundation. Once trusted Omarchy machines can recognise and
+communicate with each other safely, different continuity experiences can sit on
+top without each project inventing its own security layer.
 
-Only files deliberately placed in `share` are visible to the other trusted
-machine. Home directories, SSH keys, credentials, browser profiles, and system
-disks are not exported. The mount reconnects while both machines are online.
+The protocol's job is to ensure that only properly enrolled Omarchy machines can
+present themselves for approval. The user's job is simply to approve the
+machines they recognise. Once approved, the useful layers can unlock without
+asking the user to become a network or security administrator.
 
-## One-touch pairing
+Making that invisible layer official is where Omarchy's cooperation is needed:
+an Omarchy-backed device-enrolment path, the correct OS approval experience, a
+trusted distribution and update route, and review of the boundary beneath the
+one-click experience.
 
-`omarchy-syncd` listens on the fixed OmarchySync enrollment port `49321`.
-It accepts only a bounded `PAIR_HELLO` frame with a fresh nonce, timestamp,
-device name, and SSH public key. It then invokes the local PAM/polkit stack.
-On a fingerprint-enabled machine, that is the one-touch trust confirmation.
+That review should happen privately. Public documentation explains the promise
+and the boundaries; sensitive implementation material is reserved for the
+people Omarchy designates to assess it.
 
-Only after local authorization does it record the peer, authorize the peer's
-dedicated OmarchySync SSH key, and pin the peer's SSH host key.
-The pairing daemon is not a remote shell and does not transmit passwords or
-fingerprint data. The next iteration will add mutual session keys, revocation,
-and privilege certificates for the trusted Omarchy cluster.
+[Read the short Omarchy review brief →](docs/OMARCHY_REVIEW.md)
 
-## Quick start
+## Built for the way Omarchy is used
 
-Install the Arch package on both machines and log in normally. There are no
-pairing commands. The machines discover each other, elect one pairing
-initiator, show one local OS authentication prompt, and establish mutual SSH
-trust automatically.
+Omarchy is already an opinionated, agent-ready working environment. OmarchySync
+extends that idea across the machines a person actually owns:
 
-When both daemons are running on the same LAN, they automatically announce and
-discover each other. A deterministic device election prevents duplicate
-prompts; the selected receiver performs the one-time local authorization
-without requiring the user to provide an IP address or tell another machine to
-begin.
+| Machine | What it is good at | What OmarchySync adds |
+| --- | --- | --- |
+| Main desktop | Everyday work and local tools | The familiar home base |
+| Powerful workstation | Builds, rendering, models, long-running jobs | Available power without moving the whole workflow |
+| Laptop | Mobility, meetings, travel, lighter work | Immediate continuity without manual setup |
 
-The relationship is stored under the user's state directory and survives
-logout, reboot, and temporary network loss. No hostnames, IP addresses, or key
-copying are required.
+The aim is not to make three machines identical. It is to make them feel like
+parts of one personal system.
 
-## Sync boundaries
+## Project status
 
-Safe candidates include user Omarchy configuration, custom themes, wallpapers,
-fonts, shell/terminal configuration, scripts, projects, and designs.
+OmarchySync is an independent private prototype, not an official Omarchy
+component. The core runtime and pairing foundation are implemented. Product
+integration and the invisible security layer need review before public release
+or distribution.
 
-Local-only by default: SSH private keys, credentials, browser profiles, caches,
-machine-specific monitor/input settings, package caches, and anything requiring
-`sudo` or direct device access.
+## Documentation
 
-## Compute handoff
+- [Omarchy review brief](docs/OMARCHY_REVIEW.md) — the cooperation needed from
+  Omarchy.
+- [Acceptance criteria](docs/ACCEPTANCE.md) — the experience that must work
+  without manual setup.
+- [Architecture](docs/ARCHITECTURE.md) — runtime and capability boundaries.
+- [Installation notes](docs/INSTALL.md) — the current private prototype path.
+- [Security policy](SECURITY.md) — private reporting and disclosure guidance.
 
-`omarchy-sync capabilities` records CPU, memory, GPU, battery, fingerprint,
-and availability hints. The future scheduler can use this metadata to select a
-trusted peer for compilation, rendering, or model work. Authentication and
-privileged operations remain local to each machine unless explicitly delegated.
+## Development
+
+```bash
+mise exec rust@stable -- cargo test
+mise exec rust@stable -- cargo build --release
+```
+
+Runtime use is package-based. A release machine does not need Cargo, source
+code, or a Git checkout.
+
+---
+
+<p align="center"><strong>Your Omarchy. Wherever you sit down.</strong></p>
